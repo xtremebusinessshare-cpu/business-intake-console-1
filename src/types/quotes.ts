@@ -3,8 +3,10 @@ export type BusinessContext =
   | "xtreme_environmental"
   | "global_xtreme";
 
+// Units for limo services
 export type LimoUnit = "hrs" | "mile" | "flat";
 
+// Service line item
 export type LimoServiceLineItem = {
   id: string;
   serviceCategory: string;
@@ -15,6 +17,7 @@ export type LimoServiceLineItem = {
   estimatedAmount: number;
 };
 
+// Add-on line item
 export type LimoAddOnLineItem = {
   id: string;
   extraType: string;
@@ -23,6 +26,7 @@ export type LimoAddOnLineItem = {
   estimatedAmount: number;
 };
 
+// Quick Quote record (matches Supabase table)
 export type QuickQuoteRecord = {
   id?: string;
   businessContext: BusinessContext;
@@ -31,4 +35,9 @@ export type QuickQuoteRecord = {
   addons: LimoAddOnLineItem[];
   total: number;
   notes?: string;
+
+  // Required for PDF
+  customer_name: string;
+  service_type: string;
+  created_at: string | Date;
 };

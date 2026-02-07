@@ -8,10 +8,29 @@ export function generateQuotePDF(quote: QuickQuoteRecord) {
   doc.text("Business Intake Console — Quote", 20, 20);
 
   doc.setFontSize(12);
-  doc.text(`Customer: ${quote.customer_name}`, 20, 40);
-  doc.text(`Service: ${quote.service_type}`, 20, 50);
-  doc.text(`Date: ${new Date(quote.created_at).toLocaleDateString()}`, 20, 60);
+
+  // Multi-line customer name
+  const customerText = doc.splitTextToSize(
+    `Customer: ${quote.customer_name ?? "N/A"}`,
+    170
+  );
+  doc.text(customerText, 20, 40);
+
+  // Multi-line service type
+  const serviceText = doc.splitTextToSize(
+    `Service: ${quote.service_type ?? "N/A"}`,
+    170
+  );
+  doc.text(serviceText, 20, 50);
+
+  // Date and total
+  doc.text(
+    `Date: ${new Date(quote.created_at ?? Date.now()).toLocaleDateString()}`,
+    20,
+    60
+  );
   doc.text(`Total: $${quote.total.toFixed(2)}`, 20, 70);
 
-  doc.save(`quote-${quote.id}.pdf`);
+  // Save PDF
+  doc.save(`quote-${quote.id ?? "new"}.pdf`);
 }
