@@ -14,29 +14,31 @@ export default function HomePage() {
         </header>
 
         <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
           <DashboardCard
             title="Voice Job Logger"
-            description="Log jobs using voice notes and structured intake."
-            href="/voice-job-logger"
+            description="Log jobs using voice notes."
+            href="/voice"
           />
 
           <DashboardCard
             title="Quick Quotes"
-            description="Create non-binding, court-safe preliminary estimates."
+            description="Create non-binding estimates."
             href="/quotes"
           />
 
           <DashboardCard
             title="Receipts & Images"
-            description="Upload receipts, photos, and supporting documentation."
+            description="Upload receipts and documentation."
             href="/receipts"
           />
 
           <DashboardCard
             title="Admin Review"
-            description="View and manage all submitted quotes and records."
+            description="View submitted records."
             href="/admin"
           />
+
         </section>
       </div>
     </main>

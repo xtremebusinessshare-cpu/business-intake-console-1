@@ -1,97 +1,121 @@
 import { createClient } from "@supabase/supabase-js";
-import { QuickQuoteRecord } from "@/types/quotes";
 
 //////////////////////////////////////////////////////
-// SUPABASE CLIENT
+// SUPABASE CLIENT (Singleton)
 //////////////////////////////////////////////////////
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+export const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+//////////////////////////////////////////////////////
+// TYPES (Lightweight — avoid circular imports)
+//////////////////////////////////////////////////////
+
+export type Quote = {
+  id: string;
+  company_context: string;
+  estimate_type: string;
+  estimated_total: number;
+  subtotal_services: number;
+  subtotal_addons: number;
+  notes?: string;
+  created_at: string;
+};
 
 //////////////////////////////////////////////////////
 // SAVE QUOTE
 //////////////////////////////////////////////////////
 
-export async function saveQuickQuote(
-  quote: QuickQuoteRecord
-): Promise<QuickQuoteRecord> {
-  const { services, addons, ...quoteData } = quote;
+export async function saveQuote(payload: {
+  company_context: string;
+  estimate_type: string;
+  estimated_total: number;
+  subtotal_services: number;
+  subtotal_addons: number;
+  notes?: string;
+  disclaimer_text: string;
+  disclaimer_version: string;
+  services: any[];
+  addons: any[];
+}) {
+  const { services, addons, ...quoteData } = payload;
 
-  // ✅ Insert main quote
+  /////////////////////////////////
+  // Insert Master Quote
+  /////////////////////////////////
+
   const { data, error } = await supabase
-    .from("quick_quotes")
-    .insert([quoteData])
+    .from("quotes")
+    .insert(quoteData)
     .select()
     .single();
 
   if (error) {
-    console.error("Error saving quote:", error);
+    console.error("SAVE QUOTE ERROR:", error);
     throw error;
   }
 
   const quoteId = data.id;
 
-  //////////////////////////////////////////////////////
+  /////////////////////////////////
   // Insert Services
-  //////////////////////////////////////////////////////
+  /////////////////////////////////
 
   if (services?.length) {
     const { error: servicesError } = await supabase
-      .from("limo_services")
+      .from("quote_service_items")
       .insert(
-        services.map((service) => ({
-          ...service,
+        services.map((s) => ({
           quote_id: quoteId,
+          service_category: s.serviceCategory,
+          vehicle_type: s.vehicleType,
+          passenger_count: s.passengerCount,
+          unit: s.unit,
+          quantity: s.quantity,
+          estimated_amount: s.estimatedAmount,
         }))
       );
 
-    if (servicesError) {
-      console.error("Error saving services:", servicesError);
-      throw servicesError;
-    }
+    if (servicesError) throw servicesError;
   }
 
-  //////////////////////////////////////////////////////
+  /////////////////////////////////
   // Insert Addons
-  //////////////////////////////////////////////////////
+  /////////////////////////////////
 
   if (addons?.length) {
     const { error: addonsError } = await supabase
-      .from("limo_addons")
+      .from("quote_addons")
       .insert(
-        addons.map((addon) => ({
-          ...addon,
+        addons.map((a) => ({
           quote_id: quoteId,
+          extra_type: a.extraType,
+          unit: a.unit,
+          quantity: a.quantity,
+          estimated_amount: a.estimatedAmount,
         }))
       );
 
-    if (addonsError) {
-      console.error("Error saving addons:", addonsError);
-      throw addonsError;
-    }
+    if (addonsError) throw addonsError;
   }
 
-  return {
-    ...data,
-    services: services ?? [],
-    addons: addons ?? [],
-  };
+  return data;
 }
 
 //////////////////////////////////////////////////////
 // FETCH ALL QUOTES (ADMIN)
 //////////////////////////////////////////////////////
 
-export async function fetchAllQuotes(): Promise<QuickQuoteRecord[]> {
+export async function fetchAllQuotes(): Promise<Quote[]> {
   const { data, error } = await supabase
-    .from("quick_quotes")
+    .from("quotes")
     .select("*")
     .order("created_at", { ascending: false });
 
   if (error) {
-    console.error("Error fetching quotes:", error);
+    console.error(error);
     return [];
   }
 
@@ -102,32 +126,24 @@ export async function fetchAllQuotes(): Promise<QuickQuoteRecord[]> {
 // FETCH SINGLE QUOTE
 //////////////////////////////////////////////////////
 
-export async function fetchQuoteById(
-  id: string
-): Promise<QuickQuoteRecord | null> {
+export async function fetchQuoteById(id: string) {
   const { data: quote, error } = await supabase
-    .from("quick_quotes")
+    .from("quotes")
     .select("*")
     .eq("id", id)
     .single();
 
-  if (error || !quote) {
-    console.error("Error fetching quote:", error);
-    return null;
-  }
+  if (error || !quote) return null;
 
-  const { data: services, error: servicesError } = await supabase
-    .from("limo_services")
+  const { data: services } = await supabase
+    .from("quote_service_items")
     .select("*")
     .eq("quote_id", id);
 
-  const { data: addons, error: addonsError } = await supabase
-    .from("limo_addons")
+  const { data: addons } = await supabase
+    .from("quote_addons")
     .select("*")
     .eq("quote_id", id);
-
-  if (servicesError) console.error(servicesError);
-  if (addonsError) console.error(addonsError);
 
   return {
     ...quote,
