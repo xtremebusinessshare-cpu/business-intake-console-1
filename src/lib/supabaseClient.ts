@@ -10,8 +10,15 @@ export const supabase = createClient(
 );
 
 //////////////////////////////////////////////////////
-// TYPES (Lightweight — avoid circular imports)
+// TYPES
 //////////////////////////////////////////////////////
+
+export type QuoteStatus =
+  | "NEW"
+  | "REVIEWING"
+  | "APPROVED"
+  | "CONVERTED"
+  | "CLOSED";
 
 export type Quote = {
   id: string;
@@ -21,6 +28,7 @@ export type Quote = {
   subtotal_services: number;
   subtotal_addons: number;
   notes?: string;
+  status: QuoteStatus;
   created_at: string;
 };
 
@@ -42,13 +50,16 @@ export async function saveQuote(payload: {
 }) {
   const { services, addons, ...quoteData } = payload;
 
-  /////////////////////////////////
+  //////////////////////////////////////////////////////
   // Insert Master Quote
-  /////////////////////////////////
+  //////////////////////////////////////////////////////
 
   const { data, error } = await supabase
     .from("quotes")
-    .insert(quoteData)
+    .insert({
+      status: "NEW", // ⭐ CRITICAL — workflow starts here
+      ...quoteData,
+    })
     .select()
     .single();
 
@@ -59,9 +70,9 @@ export async function saveQuote(payload: {
 
   const quoteId = data.id;
 
-  /////////////////////////////////
+  //////////////////////////////////////////////////////
   // Insert Services
-  /////////////////////////////////
+  //////////////////////////////////////////////////////
 
   if (services?.length) {
     const { error: servicesError } = await supabase
@@ -78,12 +89,15 @@ export async function saveQuote(payload: {
         }))
       );
 
-    if (servicesError) throw servicesError;
+    if (servicesError) {
+      console.error("SERVICE INSERT ERROR:", servicesError);
+      throw servicesError;
+    }
   }
 
-  /////////////////////////////////
+  //////////////////////////////////////////////////////
   // Insert Addons
-  /////////////////////////////////
+  //////////////////////////////////////////////////////
 
   if (addons?.length) {
     const { error: addonsError } = await supabase
@@ -98,7 +112,10 @@ export async function saveQuote(payload: {
         }))
       );
 
-    if (addonsError) throw addonsError;
+    if (addonsError) {
+      console.error("ADDON INSERT ERROR:", addonsError);
+      throw addonsError;
+    }
   }
 
   return data;
@@ -115,7 +132,7 @@ export async function fetchAllQuotes(): Promise<Quote[]> {
     .order("created_at", { ascending: false });
 
   if (error) {
-    console.error(error);
+    console.error("FETCH QUOTES ERROR:", error);
     return [];
   }
 
@@ -133,7 +150,10 @@ export async function fetchQuoteById(id: string) {
     .eq("id", id)
     .single();
 
-  if (error || !quote) return null;
+  if (error || !quote) {
+    console.error("FETCH QUOTE ERROR:", error);
+    return null;
+  }
 
   const { data: services } = await supabase
     .from("quote_service_items")
@@ -150,4 +170,23 @@ export async function fetchQuoteById(id: string) {
     services: services ?? [],
     addons: addons ?? [],
   };
+}
+
+//////////////////////////////////////////////////////
+// UPDATE QUOTE STATUS (ADMIN POWER FUNCTION)
+//////////////////////////////////////////////////////
+
+export async function updateQuoteStatus(
+  id: string,
+  status: QuoteStatus
+) {
+  const { error } = await supabase
+    .from("quotes")
+    .update({ status })
+    .eq("id", id);
+
+  if (error) {
+    console.error("STATUS UPDATE ERROR:", error);
+    throw error;
+  }
 }
