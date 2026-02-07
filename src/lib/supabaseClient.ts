@@ -1,6 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { QuickQuoteRecord } from "@/types/quotes";
 
+//////////////////////////////////////////////////////
+// SUPABASE CLIENT
+//////////////////////////////////////////////////////
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
@@ -10,45 +14,74 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 // SAVE QUOTE
 //////////////////////////////////////////////////////
 
-export async function saveQuickQuote(quote: QuickQuoteRecord) {
+export async function saveQuickQuote(
+  quote: QuickQuoteRecord
+): Promise<QuickQuoteRecord> {
   const { services, addons, ...quoteData } = quote;
 
-  // Insert main quote
+  // ✅ Insert main quote
   const { data, error } = await supabase
     .from("quick_quotes")
     .insert([quoteData])
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    console.error("Error saving quote:", error);
+    throw error;
+  }
 
   const quoteId = data.id;
 
-  // Insert services
+  //////////////////////////////////////////////////////
+  // Insert Services
+  //////////////////////////////////////////////////////
+
   if (services?.length) {
-    await supabase.from("limo_services").insert(
-      services.map((s) => ({
-        ...s,
-        quote_id: quoteId,
-      }))
-    );
+    const { error: servicesError } = await supabase
+      .from("limo_services")
+      .insert(
+        services.map((service) => ({
+          ...service,
+          quote_id: quoteId,
+        }))
+      );
+
+    if (servicesError) {
+      console.error("Error saving services:", servicesError);
+      throw servicesError;
+    }
   }
 
-  // Insert addons
+  //////////////////////////////////////////////////////
+  // Insert Addons
+  //////////////////////////////////////////////////////
+
   if (addons?.length) {
-    await supabase.from("limo_addons").insert(
-      addons.map((a) => ({
-        ...a,
-        quote_id: quoteId,
-      }))
-    );
+    const { error: addonsError } = await supabase
+      .from("limo_addons")
+      .insert(
+        addons.map((addon) => ({
+          ...addon,
+          quote_id: quoteId,
+        }))
+      );
+
+    if (addonsError) {
+      console.error("Error saving addons:", addonsError);
+      throw addonsError;
+    }
   }
 
-  return data;
+  return {
+    ...data,
+    services: services ?? [],
+    addons: addons ?? [],
+  };
 }
 
 //////////////////////////////////////////////////////
-// FETCH ALL QUOTES (ADMIN PAGE)
+// FETCH ALL QUOTES (ADMIN)
 //////////////////////////////////////////////////////
 
 export async function fetchAllQuotes(): Promise<QuickQuoteRecord[]> {
@@ -57,7 +90,10 @@ export async function fetchAllQuotes(): Promise<QuickQuoteRecord[]> {
     .select("*")
     .order("created_at", { ascending: false });
 
-  if (error) throw error;
+  if (error) {
+    console.error("Error fetching quotes:", error);
+    return [];
+  }
 
   return data ?? [];
 }
@@ -75,17 +111,23 @@ export async function fetchQuoteById(
     .eq("id", id)
     .single();
 
-  if (error || !quote) return null;
+  if (error || !quote) {
+    console.error("Error fetching quote:", error);
+    return null;
+  }
 
-  const { data: services } = await supabase
+  const { data: services, error: servicesError } = await supabase
     .from("limo_services")
     .select("*")
     .eq("quote_id", id);
 
-  const { data: addons } = await supabase
+  const { data: addons, error: addonsError } = await supabase
     .from("limo_addons")
     .select("*")
     .eq("quote_id", id);
+
+  if (servicesError) console.error(servicesError);
+  if (addonsError) console.error(addonsError);
 
   return {
     ...quote,
