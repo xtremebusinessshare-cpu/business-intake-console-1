@@ -4,7 +4,6 @@ export default function HomePage() {
   return (
     <main className="min-h-screen bg-zinc-50 p-8">
       <div className="max-w-5xl mx-auto space-y-8">
-        {/* Header */}
         <header>
           <h1 className="text-3xl font-bold">
             Business Intake Console
@@ -14,12 +13,11 @@ export default function HomePage() {
           </p>
         </header>
 
-        {/* Dashboard Cards */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <DashboardCard
             title="Voice Job Logger"
             description="Log jobs using voice notes and structured intake."
-            href="/voice"
+            href="/voice-job-logger"
           />
 
           <DashboardCard
@@ -37,7 +35,7 @@ export default function HomePage() {
           <DashboardCard
             title="Admin Review"
             description="View and manage all submitted quotes and records."
-            href="/admin/quotes"
+            href="/admin"
           />
         </section>
       </div>
