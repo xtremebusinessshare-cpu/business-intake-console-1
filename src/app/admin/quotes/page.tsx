@@ -1,22 +1,64 @@
+import Link from "next/link";
 import { fetchAllQuotes } from "@/lib/supabaseClient";
 
 export default async function AdminQuotesPage() {
   const quotes = await fetchAllQuotes();
 
   return (
-    <div className="p-4">
-      <h1 className="text-xl font-bold">All Quotes</h1>
-      {quotes.length === 0 ? (
-        <p>No quotes found</p>
-      ) : (
-        <ul>
-          {quotes.map(q => (
-            <li key={q.id}>
-              {q.customer_name} — {q.service_type} — ${q.total}
-            </li>
+    <main className="min-h-screen bg-zinc-50 p-8">
+      <div className="max-w-6xl mx-auto">
+
+        <header className="mb-8">
+          <h1 className="text-3xl font-bold">
+            Submitted Quotes
+          </h1>
+
+          <p className="text-zinc-600 mt-2">
+            Internal view of all preliminary estimates
+          </p>
+        </header>
+
+        {quotes.length === 0 && (
+          <div className="bg-white border rounded-xl p-6">
+            No quotes submitted yet.
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {quotes.map((quote) => (
+            <Link
+              key={quote.id}
+              href={`/admin/quotes/${quote.id}`}
+              className="block bg-white border rounded-xl p-5 hover:shadow-md transition"
+            >
+              <div className="flex justify-between">
+
+                <div>
+                  <p className="font-semibold">
+                    {quote.company_context.toUpperCase()}
+                  </p>
+
+                  <p className="text-sm text-zinc-600">
+                    {quote.estimate_type}
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <p className="font-bold">
+                    ${quote.estimated_total.toFixed(2)}
+                  </p>
+
+                  <p className="text-xs text-zinc-500">
+                    {new Date(quote.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+
+              </div>
+            </Link>
           ))}
-        </ul>
-      )}
-    </div>
+        </div>
+
+      </div>
+    </main>
   );
 }
