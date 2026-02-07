@@ -2,60 +2,38 @@
 
 import { useState } from "react";
 import { saveQuickQuote } from "@/lib/supabaseClient";
-import { LimoLineItems } from "@/components/quotes/LimoLineItems";
-import { useRouter } from "next/navigation";
+import { QuickQuoteRecord } from "@/types/quotes";
+import { generateQuotePDF } from "@/lib/pdf";
 
 export default function NewQuotePage() {
-  const router = useRouter();
-
-  const [customerName, setCustomerName] = useState("");
-  const [serviceType, setServiceType] = useState("");
+  const [customer, setCustomer] = useState("");
+  const [service, setService] = useState("");
   const [total, setTotal] = useState(0);
-  const [saving, setSaving] = useState(false);
 
-  async function handleSave() {
-    setSaving(true);
-
-    await saveQuickQuote({
-      customer_name: customerName,
-      service_type: serviceType,
+  const handleSave = async () => {
+    const quote: QuickQuoteRecord = {
+      customer_name: customer,
+      service_type: service,
       total,
-    });
+      estimateType: "limo",
+      businessContext: "exquisite_limo",
+      services: [],
+      addons: [],
+      created_at: new Date(),
+    };
 
-    router.push("/admin/quotes");
-  }
+    const saved = await saveQuickQuote(quote);
+    generateQuotePDF(saved);
+    alert("Quote saved and PDF generated!");
+  };
 
   return (
-    <main className="p-8 space-y-6">
-      <h1 className="text-2xl font-bold">New Quote</h1>
-
-      <input
-        className="border p-2 w-full"
-        placeholder="Customer Name"
-        value={customerName}
-        onChange={(e) => setCustomerName(e.target.value)}
-      />
-
-      <input
-        className="border p-2 w-full"
-        placeholder="Service Type"
-        value={serviceType}
-        onChange={(e) => setServiceType(e.target.value)}
-      />
-
-      <LimoLineItems onTotalChange={setTotal} />
-
-      <div className="text-right font-bold">
-        Total: ${total.toFixed(2)}
-      </div>
-
-      <button
-        onClick={handleSave}
-        disabled={saving}
-        className="px-4 py-2 bg-black text-white"
-      >
-        {saving ? "Saving..." : "Save Quote"}
-      </button>
-    </main>
+    <div className="p-4">
+      <h1 className="text-xl font-bold">New Quote</h1>
+      <input placeholder="Customer Name" value={customer} onChange={e => setCustomer(e.target.value)} />
+      <input placeholder="Service Type" value={service} onChange={e => setService(e.target.value)} />
+      <input type="number" placeholder="Total" value={total} onChange={e => setTotal(Number(e.target.value))} />
+      <button onClick={handleSave}>Save & Generate PDF</button>
+    </div>
   );
 }
