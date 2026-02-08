@@ -1,41 +1,56 @@
 import Link from "next/link";
-import { fetchAllQuotes } from "@/lib/supabaseClient";
 
-export default async function AdminQuotesPage() {
-  const quotes = await fetchAllQuotes();
-
+export default function AdminDashboard() {
   return (
-    <main className="max-w-6xl mx-auto p-6">
-      <h1 className="text-2xl font-bold mb-6">Admin — Quotes</h1>
+    <main className="min-h-screen bg-zinc-50 p-8">
+      <div className="max-w-6xl mx-auto space-y-8">
+        <header>
+          <h1 className="text-3xl font-bold">Admin Console</h1>
+          <p className="text-zinc-600 mt-2">
+            Internal management of quotes, receipts, and voice logs
+          </p>
+        </header>
 
-      {quotes.length === 0 ? (
-        <p className="text-zinc-500">No quotes found.</p>
-      ) : (
-        <div className="space-y-4">
-          {quotes.map((quote) => (
-            <Link
-              key={quote.id}
-              href={`/admin/quotes/${quote.id}`}
-              className="block border rounded-xl p-4 hover:bg-zinc-50"
-            >
-              <div className="flex justify-between">
-                <div>
-                  <p className="font-semibold">
-                    {quote.company_context} — {quote.estimate_type}
-                  </p>
-                  <p className="text-sm text-zinc-600">
-                    ${quote.estimated_total.toFixed(2)}
-                  </p>
-                </div>
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <AdminCard
+            title="Quotes"
+            description="View all submitted preliminary estimates"
+            href="/admin/quotes"
+          />
 
-                <span className="text-xs px-3 py-1 rounded-full bg-zinc-200">
-                  {quote.status}
-                </span>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
+          <AdminCard
+            title="Receipts"
+            description="Review uploaded receipts and images"
+            href="/admin/receipts"
+          />
+
+          <AdminCard
+            title="Voice Logs"
+            description="Access recorded job intakes"
+            href="/admin/voice"
+          />
+        </section>
+      </div>
     </main>
+  );
+}
+
+function AdminCard({
+  title,
+  description,
+  href,
+}: {
+  title: string;
+  description: string;
+  href: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="block bg-white border rounded-xl p-6 hover:shadow-md transition"
+    >
+      <h2 className="text-xl font-semibold mb-2">{title}</h2>
+      <p className="text-zinc-600 text-sm">{description}</p>
+    </Link>
   );
 }
