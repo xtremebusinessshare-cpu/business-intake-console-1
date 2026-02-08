@@ -64,7 +64,8 @@ export async function saveQuote(payload: {
     .single();
 
   if (error) {
-    console.error("SAVE QUOTE ERROR:", error);
+   console.error("SAVE QUOTE ERROR:", JSON.stringify(error, null, 2));
+ 
     throw error;
   }
 

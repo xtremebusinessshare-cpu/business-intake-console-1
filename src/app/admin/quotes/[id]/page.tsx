@@ -1,87 +1,92 @@
 import { fetchQuoteById } from "@/lib/supabaseClient";
-import Link from "next/link";
+import { notFound } from "next/navigation";
 
-export default async function QuoteDetail({
+export default async function AdminQuoteDetail({
   params,
 }: {
   params: { id: string };
 }) {
   const quote = await fetchQuoteById(params.id);
 
-  if (!quote) {
-    return (
-      <main className="p-8">
-        Quote not found.
-      </main>
-    );
-  }
+  if (!quote) return notFound();
 
   return (
     <main className="min-h-screen bg-zinc-50 p-8">
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="max-w-4xl mx-auto bg-white border rounded-xl p-6">
 
-        <Link href="/admin/quotes" className="underline text-sm">
-          ← Back to Quotes
-        </Link>
-
-        <header>
-          <h1 className="text-3xl font-bold">
-            Quote Details
+        <header className="mb-6">
+          <h1 className="text-2xl font-bold">
+            Quote #{quote.id}
           </h1>
+
+          <p className="text-zinc-600">
+            {quote.company_context} — {quote.estimate_type}
+          </p>
         </header>
 
-        <section className="bg-white border rounded-xl p-6 space-y-2">
-          <p><strong>Company:</strong> {quote.company_context}</p>
-          <p><strong>Type:</strong> {quote.estimate_type}</p>
-          <p><strong>Total:</strong> ${quote.estimated_total.toFixed(2)}</p>
-          <p><strong>Notes:</strong> {quote.notes || "None"}</p>
-        </section>
+        {/* STATUS */}
+        <div className="mb-6">
+          <span className="text-sm font-semibold mr-2">
+            Status:
+          </span>
+
+          <span className="px-3 py-1 rounded-full bg-zinc-200 text-sm">
+            {quote.status}
+          </span>
+        </div>
+
+        {/* TOTAL */}
+        <div className="mb-6">
+          <p className="text-lg font-bold">
+            Estimated Total: ${quote.estimated_total.toFixed(2)}
+          </p>
+        </div>
+
+        {/* NOTES */}
+        {quote.notes && (
+          <div className="mb-6">
+            <h2 className="font-semibold mb-2">Notes</h2>
+            <p className="text-zinc-700 whitespace-pre-wrap">
+              {quote.notes}
+            </p>
+          </div>
+        )}
 
         {/* SERVICES */}
-        <section className="bg-white border rounded-xl p-6">
-          <h2 className="font-semibold mb-4">Services</h2>
+        {quote.services?.length > 0 && (
+          <div className="mb-6">
+            <h2 className="font-semibold mb-2">Services</h2>
 
-          {quote.services?.length === 0 && (
-            <p className="text-zinc-500">No services</p>
-          )}
-
-          <div className="space-y-3">
-            {quote.services?.map((s: any) => (
-              <div
-                key={s.id}
-                className="border rounded-lg p-3"
-              >
-                <p>{s.service_category}</p>
-                <p className="text-sm text-zinc-600">
-                  Qty: {s.quantity} — ${s.estimated_amount}
-                </p>
-              </div>
-            ))}
+            <div className="space-y-2">
+              {quote.services.map((s: any) => (
+                <div
+                  key={s.id}
+                  className="border rounded-lg p-3"
+                >
+                  {s.service_category} — ${s.estimated_amount}
+                </div>
+              ))}
+            </div>
           </div>
-        </section>
+        )}
 
         {/* ADDONS */}
-        <section className="bg-white border rounded-xl p-6">
-          <h2 className="font-semibold mb-4">Add-ons</h2>
+        {quote.addons?.length > 0 && (
+          <div>
+            <h2 className="font-semibold mb-2">Add-ons</h2>
 
-          {quote.addons?.length === 0 && (
-            <p className="text-zinc-500">No add-ons</p>
-          )}
-
-          <div className="space-y-3">
-            {quote.addons?.map((a: any) => (
-              <div
-                key={a.id}
-                className="border rounded-lg p-3"
-              >
-                <p>{a.extra_type}</p>
-                <p className="text-sm text-zinc-600">
-                  Qty: {a.quantity} — ${a.estimated_amount}
-                </p>
-              </div>
-            ))}
+            <div className="space-y-2">
+              {quote.addons.map((a: any) => (
+                <div
+                  key={a.id}
+                  className="border rounded-lg p-3"
+                >
+                  {a.extra_type} — ${a.estimated_amount}
+                </div>
+              ))}
+            </div>
           </div>
-        </section>
+        )}
 
       </div>
     </main>
