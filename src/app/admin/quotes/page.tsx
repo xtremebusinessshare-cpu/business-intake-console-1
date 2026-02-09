@@ -41,7 +41,12 @@ export default async function AdminQuotesPage() {
 
                   <div className="text-right">
                     <p className="font-bold">
-                      ${quote.estimated_total.toFixed(2)}
+                    {Number(quote.estimated_total ?? 0).toLocaleString(undefined, {
+  style: "currency",
+  currency: "USD",
+})}
+
+
                     </p>
 
                     <span className="text-xs px-3 py-1 rounded-full bg-zinc-200">
