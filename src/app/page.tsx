@@ -15,11 +15,12 @@ export default function HomePage() {
 
         <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-          <DashboardCard
-            title="Voice Job Logger"
-            description="Log jobs using voice notes."
-            href="/voice"
-          />
+        <DashboardCard
+  title="Voice Job Logger"
+  description="Log jobs using voice notes."
+  href="/voice-job-logger"
+/>
+
 
           <DashboardCard
             title="Quick Quotes"
