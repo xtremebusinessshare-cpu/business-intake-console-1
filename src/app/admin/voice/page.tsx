@@ -51,16 +51,26 @@ export default async function AdminVoicePage() {
         <div className="space-y-4">
           {logs.map((log: any) => (
             <div key={log.id} className="border rounded-xl p-4 bg-white">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-semibold">
                   {log.company_context ?? "—"}{" "}
                   <span className="text-xs text-zinc-500 font-normal">
                     ({log.source ?? "unknown"})
                   </span>
                 </p>
-                <p className="text-xs text-zinc-500">
-                  {log.created_at ? new Date(log.created_at).toLocaleString() : ""}
-                </p>
+
+                <div className="flex items-center gap-3">
+                  <p className="text-xs text-zinc-500">
+                    {log.created_at ? new Date(log.created_at).toLocaleString() : ""}
+                  </p>
+
+                  <Link
+                    href={`/quotes/new?logId=${log.id}`}
+                    className="px-3 py-2 rounded bg-black text-white text-sm font-semibold"
+                  >
+                    Convert to Quote
+                  </Link>
+                </div>
               </div>
 
               <p className="whitespace-pre-line text-sm mt-2">{log.transcript}</p>

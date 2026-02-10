@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 type Business = "xes" | "gxs" | "exquisite_limo";
 type Unit =
@@ -44,6 +44,8 @@ const UNIT_OPTIONS: { value: Unit; label: string }[] = [
 
 export default function NewQuotePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const logId = searchParams.get("logId");
 
   const [business, setBusiness] = useState<Business>("xes");
   const [estimateType, setEstimateType] = useState<string>("remediation");
@@ -70,6 +72,51 @@ export default function NewQuotePage() {
   const [error, setError] = useState<string | null>(null);
 
   const isLimo = business === "exquisite_limo";
+
+  // Prefill from job log if ?logId= is present
+  useEffect(() => {
+    async function prefillFromLog() {
+      if (!logId) return;
+
+      try {
+        const res = await fetch(`/api/job-logs/${logId}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || "Failed to load job log.");
+
+        const log = data?.log;
+
+        if (log?.company_context) {
+          setBusiness(log.company_context as Business);
+
+          // lightweight estimate type guess (editable)
+          if (log.company_context === "exquisite_limo") setEstimateType("limo");
+          else if (log.company_context === "gxs") setEstimateType("repairs");
+          else setEstimateType("remediation");
+        }
+
+        if (log?.transcript) {
+          setNotes((prev) => {
+            const header = `--- From Job Log (${logId}) ---\n`;
+            return prev?.trim() ? `${prev}\n\n${header}${log.transcript}` : `${header}${log.transcript}`;
+          });
+        }
+
+        // Optional: add a starter service row name using first line of transcript
+        if (log?.transcript && services.length === 1 && !services[0].name.trim()) {
+          const firstLine = String(log.transcript).split("\n").find((x) => x.trim())?.trim();
+          if (firstLine) {
+            setServices((prev) => prev.map((li, idx) => (idx === 0 ? { ...li, name: firstLine.slice(0, 80) } : li)));
+          }
+        }
+      } catch (e) {
+        console.error(e);
+        // keep quiet: user can still create quote manually
+      }
+    }
+
+    prefillFromLog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logId]);
 
   const servicesSubtotal = useMemo(
     () => services.reduce((sum, li) => sum + (li.qty || 0) * (li.unitPrice || 0), 0),
@@ -283,6 +330,7 @@ export default function NewQuotePage() {
         </div>
       </div>
 
+      {/* Services */}
       <div className="rounded-xl border p-4 bg-white space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Services</h2>
@@ -337,6 +385,7 @@ export default function NewQuotePage() {
         </div>
       </div>
 
+      {/* Add-ons */}
       <div className="rounded-xl border p-4 bg-white space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Add-ons (optional)</h2>
@@ -385,6 +434,7 @@ export default function NewQuotePage() {
         </div>
       </div>
 
+      {/* Totals + Save */}
       <div className="rounded-xl border p-4 bg-white">
         <div className="flex items-center justify-between">
           <div>
