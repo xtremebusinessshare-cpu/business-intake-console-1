@@ -1,15 +1,19 @@
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 
-function supabaseServer() {
+function supabaseAdmin() {
   const url = process.env.SUPABASE_URL;
-  const anon = process.env.SUPABASE_ANON_KEY; // server-side reads with RLS
-  if (!url || !anon) throw new Error("Missing SUPABASE_URL or SUPABASE_ANON_KEY");
-  return createClient(url, anon, { auth: { persistSession: false } });
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars.");
+  }
+
+  return createClient(url, key, { auth: { persistSession: false } });
 }
 
 export default async function AdminVoicePage() {
-  const supabase = supabaseServer();
+  const supabase = supabaseAdmin();
 
   const { data: logs, error } = await supabase
     .from("job_logs")
@@ -22,15 +26,12 @@ export default async function AdminVoicePage() {
         <div>
           <h1 className="text-2xl font-bold">Admin — Job Logs</h1>
           <p className="text-sm text-zinc-600">
-            Shows both typed logs and future voice transcriptions.
+            Shows typed logs and future transcribed voice logs.
           </p>
         </div>
 
         <div className="flex gap-2">
-          <Link
-            href="/"
-            className="px-4 py-2 rounded bg-zinc-100 font-semibold"
-          >
+          <Link href="/" className="px-4 py-2 rounded bg-zinc-100 font-semibold">
             Home
           </Link>
           <Link
@@ -44,7 +45,7 @@ export default async function AdminVoicePage() {
 
       {error ? (
         <p className="text-red-600">Failed to load job logs: {error.message}</p>
-      ) : logs?.length === 0 ? (
+      ) : !logs || logs.length === 0 ? (
         <p className="text-zinc-500">No job logs yet.</p>
       ) : (
         <div className="space-y-4">
@@ -62,9 +63,7 @@ export default async function AdminVoicePage() {
                 </p>
               </div>
 
-              <p className="whitespace-pre-line text-sm mt-2">
-                {log.transcript}
-              </p>
+              <p className="whitespace-pre-line text-sm mt-2">{log.transcript}</p>
             </div>
           ))}
         </div>
