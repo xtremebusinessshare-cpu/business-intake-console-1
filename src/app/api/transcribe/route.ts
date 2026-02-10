@@ -7,7 +7,10 @@ export async function POST(req: Request) {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ error: "Missing OPENAI_API_KEY env var." }, { status: 500 });
+      return NextResponse.json(
+        { error: "Missing OPENAI_API_KEY env var." },
+        { status: 500 }
+      );
     }
 
     const form = await req.formData();
@@ -27,8 +30,22 @@ export async function POST(req: Request) {
       model: "gpt-4o-mini-transcribe",
     });
 
-    return NextResponse.json({ text: (result as any)?.text ?? "" }, { status: 200 });
+    return NextResponse.json(
+      { text: (result as any)?.text ?? "" },
+      { status: 200 }
+    );
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Transcription failed." }, { status: 500 });
+    const msg = e?.message || "Transcription failed.";
+
+    const friendly =
+      msg.toLowerCase().includes("quota") ||
+      msg.toLowerCase().includes("billing")
+        ? "Transcription is temporarily unavailable due to an OpenAI billing/quota issue."
+        : msg;
+
+    return NextResponse.json(
+      { error: friendly },
+      { status: 500 }
+    );
   }
 }
