@@ -1,147 +1,94 @@
 "use client";
-import Link from "next/link";
 
-import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
 import { saveJobLog } from "@/lib/supabaseClient";
 
 type CompanyContext = "xes" | "gxs" | "exquisite_limo";
+type Priority = "Low" | "Medium" | "High";
 
-export default function VoiceLoggerPage() {
-  const [companyContext, setCompanyContext] = useState<CompanyContext>("xes");
+function buildTranscript(input: {
+  priority: Priority;
+  important: boolean;
+  client: string;
+  city: string;
+  service: string;
+  sqft: string;
+  actions: string[];
+  notes: string;
+}) {
+  const lines: string[] = [];
 
-  // Recording state
-  const [isRecording, setIsRecording] = useState(false);
-  const [audioURL, setAudioURL] = useState<string | null>(null);
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  // Always include priority (helps sorting)
+  lines.push(`Priority: ${input.priority}`);
 
-  // Transcript (manual for now)
-  const [transcript, setTranscript] = useState("");
+  if (input.important) lines.push(`Important: Yes`);
 
-  // UI state
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  if (input.client.trim()) lines.push(`Client: ${input.client.trim()}`);
+  if (input.city.trim()) lines.push(`City: ${input.city.trim()}`);
+  if (input.service.trim()) lines.push(`Service: ${input.service.trim()}`);
+  if (input.sqft.trim()) lines.push(`SqFt: ${input.sqft.trim()}`);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
+  // Actions become a task list
+  input.actions
+    .map((a) => a.trim())
+    .filter(Boolean)
+    .forEach((a) => lines.push(`Action: ${a}`));
 
-  useEffect(() => {
-    // Cleanup on unmount
-    return () => {
-      if (audioURL) URL.revokeObjectURL(audioURL);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function startRecording() {
-    setError(null);
-
-    try {
-      // Ask for microphone permission
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      // Pick a mimeType the browser supports
-      const preferredTypes = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/mp4",
-      ];
-      const mimeType =
-        preferredTypes.find((t) => MediaRecorder.isTypeSupported(t)) || "";
-
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      mediaRecorderRef.current = recorder;
-      chunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        setAudioBlob(blob);
-
-        if (audioURL) URL.revokeObjectURL(audioURL);
-        const url = URL.createObjectURL(blob);
-        setAudioURL(url);
-
-        // Stop mic
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((t) => t.stop());
-          streamRef.current = null;
-        }
-      };
-
-      recorder.start();
-      setIsRecording(true);
-    } catch (err: any) {
-      setError(
-        err?.message ||
-          "Microphone permission denied or unavailable. Please allow mic access."
-      );
-      setIsRecording(false);
-    }
+  if (input.notes.trim()) {
+    lines.push("");
+    lines.push(input.notes.trim());
   }
 
-  function stopRecording() {
-    setError(null);
-
-    const recorder = mediaRecorderRef.current;
-    if (!recorder) return;
-
-    if (recorder.state !== "inactive") recorder.stop();
-    mediaRecorderRef.current = null;
-    setIsRecording(false);
-  }
-
-  function clearRecording() {
-    setError(null);
-    if (audioURL) URL.revokeObjectURL(audioURL);
-    setAudioURL(null);
-    setAudioBlob(null);
-    chunksRef.current = [];
-  }
-
-  async function transcribeRecording() {
-  if (!audioBlob) {
-    setError("Record audio first, then transcribe.");
-    return;
-  }
-
-  setError(null);
-
-  try {
-    const fd = new FormData();
-    fd.append("file", audioBlob, "audio.webm");
-
-    const res = await fetch("/api/transcribe", {
-      method: "POST",
-      body: fd,
-    });
-
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.error || "Transcription failed.");
-
-    const text = (data?.text ?? "").toString().trim();
-    if (!text) throw new Error("No text returned from transcription.");
-
-    setTranscript(text);
-  } catch (err: any) {
-    setError(err?.message || "Transcription failed.");
-  }
+  return lines.join("\n");
 }
 
+export default function VoiceJobLoggerPage() {
+  const [companyContext, setCompanyContext] = useState<CompanyContext>("xes");
 
-  async function handleSave() {
+  // Structured fields (typed form)
+  const [priority, setPriority] = useState<Priority>("Medium");
+  const [important, setImportant] = useState(false);
+
+  const [client, setClient] = useState("");
+  const [city, setCity] = useState("");
+  const [service, setService] = useState("");
+  const [sqft, setSqft] = useState("");
+
+  const [actionInput, setActionInput] = useState("");
+  const [actions, setActions] = useState<string[]>([]);
+
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const transcriptPreview = useMemo(() => {
+    return buildTranscript({
+      priority,
+      important,
+      client,
+      city,
+      service,
+      sqft,
+      actions,
+      notes,
+    });
+  }, [priority, important, client, city, service, sqft, actions, notes]);
+
+  function addAction() {
+    const v = actionInput.trim();
+    if (!v) return;
+    setActions((p) => [...p, v]);
+    setActionInput("");
+  }
+
+  async function onSave() {
     setError(null);
+    setSavedMsg(null);
 
-    // For now, we save the transcript text (typed or transcribed later).
-    if (!transcript.trim()) {
-      setError("Please type a short job description (or transcribe audio) before saving.");
+    if (!notes.trim() && actions.length === 0 && !client.trim() && !service.trim()) {
+      setError("Add at least a note, an action, or basic client/service info.");
       return;
     }
 
@@ -149,140 +96,204 @@ export default function VoiceLoggerPage() {
     try {
       await saveJobLog({
         company_context: companyContext,
-        transcript,
+        transcript: transcriptPreview,
+        source: "typed",
       });
 
-      // Reset
-      setTranscript("");
-      clearRecording();
-      alert("Job log saved.");
-    } catch (err: any) {
-      console.error(err);
-      setError(err?.message || "Failed to save job log.");
+      setSavedMsg("Saved. You can view it in Logs.");
+      // reset (keep company + priority)
+      setImportant(false);
+      setClient("");
+      setCity("");
+      setService("");
+      setSqft("");
+      setActions([]);
+      setActionInput("");
+      setNotes("");
+    } catch (e: any) {
+      setError(e?.message || "Failed to save log.");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold">Voice Job Logger</h1>
-        <p className="text-zinc-600">
-          Record a voice note, then type or transcribe a summary and save it as a job log.
-        </p>
-      </header>
-<header className="flex items-center justify-between">
-  <div>
-    <h1 className="text-2xl font-bold">Voice Job Logger</h1>
-    <p className="text-zinc-600">
-      Record or type job details, then save to logs.
-    </p>
-  </div>
-
-  <div className="flex gap-2">
-    <Link href="/" className="px-4 py-2 rounded bg-zinc-100 font-semibold">
-      Home
-    </Link>
-    <Link
-      href="/admin/voice"
-      className="px-4 py-2 rounded bg-black text-white font-semibold"
-    >
-      View Logs
-    </Link>
-  </div>
-</header>
-
-      <section className="rounded-xl border bg-white p-4 space-y-4">
+    <main className="max-w-5xl mx-auto p-6 space-y-6">
+      <header className="flex items-start justify-between gap-4">
         <div>
-          <label className="text-sm font-medium">Business</label>
-          <select
-            className="mt-1 w-full border p-2 rounded"
-            value={companyContext}
-            onChange={(e) => setCompanyContext(e.target.value as CompanyContext)}
-          >
-            <option value="xes">Xtreme Environmental Service</option>
-            <option value="gxs">Global Xtreme Services</option>
-            <option value="exquisite_limo">Exquisite Limo</option>
-          </select>
+          <h1 className="text-2xl font-bold">Job Logger</h1>
+          <p className="text-zinc-600">
+            Capture notes + action items and optionally enter quote-ready details (client, service, sqft).
+          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {!isRecording ? (
-            <button
-              onClick={startRecording}
-              className="px-4 py-2 rounded bg-black text-white font-semibold"
-              type="button"
+        <div className="flex gap-2">
+          <Link href="/" className="px-4 py-2 rounded bg-zinc-100 font-semibold">
+            Home
+          </Link>
+          <Link href="/admin/voice" className="px-4 py-2 rounded bg-black text-white font-semibold">
+            View Logs
+          </Link>
+        </div>
+      </header>
+
+      {/* Instructions */}
+      <div className="rounded-xl border bg-white p-4 space-y-2">
+        <p className="font-semibold">How to use this</p>
+        <ul className="list-disc pl-5 text-sm text-zinc-700 space-y-1">
+          <li>Use this like a “central notes + tasks” hub for the business.</li>
+          <li>Enter client/service/sqft when you want to convert into a quote later.</li>
+          <li>Use Actions for reminders: “find invoice”, “adjust water meter”, “check shelves”.</li>
+          <li>Mark Important + set Priority so you can sort and focus fast in Logs.</li>
+        </ul>
+        <p className="text-xs text-zinc-500">
+          Tip: This will store everything as one transcript so it stays flexible now and can become “enterprise smart” later.
+        </p>
+      </div>
+
+      {/* Form */}
+      <div className="rounded-xl border bg-white p-4 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="text-sm font-medium">Business</label>
+            <select
+              className="mt-1 w-full rounded-lg border p-2"
+              value={companyContext}
+              onChange={(e) => setCompanyContext(e.target.value as CompanyContext)}
             >
-              Start Recording
-            </button>
-          ) : (
-            <button
-              onClick={stopRecording}
-              className="px-4 py-2 rounded bg-red-600 text-white font-semibold"
-              type="button"
+              <option value="xes">XES</option>
+              <option value="gxs">GXS</option>
+              <option value="exquisite_limo">Exquisite Limo</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium">Priority</label>
+            <select
+              className="mt-1 w-full rounded-lg border p-2"
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as Priority)}
             >
-              Stop Recording
-            </button>
-          )}
+              <option>Low</option>
+              <option>Medium</option>
+              <option>High</option>
+            </select>
+          </div>
 
-          <button
-            onClick={clearRecording}
-            className="px-4 py-2 rounded bg-zinc-100 font-semibold"
-            type="button"
-            disabled={isRecording || (!audioBlob && !audioURL)}
-          >
-            Clear
-          </button>
-
-          <button
-            onClick={transcribeRecording}
-            className="px-4 py-2 rounded bg-zinc-100 font-semibold"
-            type="button"
-            disabled={!audioBlob || isRecording}
-            title="Next step: wire Whisper transcription"
-          >
-            Transcribe (next)
-          </button>
-
-          {isRecording && (
-            <span className="text-sm text-red-600 font-semibold">● Recording…</span>
-          )}
+          <div className="flex items-end">
+            <label className="inline-flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={important}
+                onChange={(e) => setImportant(e.target.checked)}
+              />
+              Mark as Important
+            </label>
+          </div>
         </div>
 
-        {audioURL && (
-          <div className="rounded-lg bg-zinc-50 p-3">
-            <p className="text-sm font-medium mb-2">Playback</p>
-            <audio controls src={audioURL} className="w-full" />
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <label className="text-sm font-medium">Client (optional)</label>
+            <input className="mt-1 w-full rounded-lg border p-2" value={client} onChange={(e) => setClient(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-sm font-medium">City (optional)</label>
+            <input className="mt-1 w-full rounded-lg border p-2" value={city} onChange={(e) => setCity(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Service (optional)</label>
+            <input className="mt-1 w-full rounded-lg border p-2" value={service} onChange={(e) => setService(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-sm font-medium">SqFt (optional)</label>
+            <input className="mt-1 w-full rounded-lg border p-2" value={sqft} onChange={(e) => setSqft(e.target.value)} placeholder="e.g. 1200" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+          <div className="md:col-span-10">
+            <label className="text-sm font-medium">Action item (optional)</label>
+            <input
+              className="mt-1 w-full rounded-lg border p-2"
+              value={actionInput}
+              onChange={(e) => setActionInput(e.target.value)}
+              placeholder="e.g. find invoice for customer"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addAction();
+                }
+              }}
+            />
+          </div>
+          <div className="md:col-span-2 flex items-end">
+            <button
+              type="button"
+              className="w-full rounded-lg bg-zinc-100 px-3 py-2 font-semibold"
+              onClick={addAction}
+            >
+              + Add
+            </button>
+          </div>
+        </div>
+
+        {actions.length > 0 && (
+          <div className="text-sm">
+            <p className="font-semibold">Actions</p>
+            <ul className="list-disc pl-5 text-zinc-700">
+              {actions.map((a, idx) => (
+                <li key={idx} className="flex items-center justify-between gap-3">
+                  <span>{a}</span>
+                  <button
+                    type="button"
+                    className="text-xs text-red-600"
+                    onClick={() => setActions((p) => p.filter((_, i) => i !== idx))}
+                  >
+                    remove
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
-      </section>
 
-      <section className="rounded-xl border bg-white p-4 space-y-3">
-        <label className="text-sm font-medium">
-          Job description / transcript (required for saving)
-        </label>
-        <textarea
-          placeholder="Type the job details here (or paste transcription)..."
-          className="w-full border p-3 rounded h-44"
-          value={transcript}
-          onChange={(e) => setTranscript(e.target.value)}
-        />
+        <div>
+          <label className="text-sm font-medium">Notes (what happened / what to remember)</label>
+          <textarea
+            className="mt-1 w-full rounded-lg border p-2"
+            rows={6}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Type notes here (or paste in voice transcript later)."
+          />
+        </div>
 
-        <button
-          onClick={handleSave}
-          className="px-5 py-3 rounded-md bg-black text-white font-semibold disabled:opacity-60"
-          disabled={saving}
-        >
-          {saving ? "Saving…" : "Save Job Log"}
-        </button>
+        {/* Preview */}
+        <div className="rounded-lg bg-zinc-50 border p-3">
+          <p className="text-sm font-semibold mb-2">Saved transcript preview</p>
+          <pre className="whitespace-pre-wrap text-xs text-zinc-700">{transcriptPreview}</pre>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            className="rounded-lg bg-black text-white px-5 py-3 font-semibold disabled:opacity-60"
+            disabled={saving}
+            onClick={onSave}
+          >
+            {saving ? "Saving…" : "Save Log"}
+          </button>
+
+          {savedMsg && <span className="text-sm text-green-700">{savedMsg}</span>}
+        </div>
 
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {error}
           </div>
         )}
-      </section>
+      </div>
     </main>
   );
 }

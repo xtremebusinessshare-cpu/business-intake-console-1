@@ -142,26 +142,14 @@ export async function saveJobLog(payload: {
   });
 
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || "Failed to save job log.");
+  if (!res.ok) throw new Error(data?.error || "Failed to save log.");
 
   return data?.log;
 }
 
-/**
- * Fetch logs for display (client-side).
- * IMPORTANT: Your actual table is `voice_logs` (not `job_logs`).
- * If RLS blocks this read, move it behind a server API route later.
- */
 export async function fetchJobLogs() {
-  const { data, error } = await supabase
-    .from("voice_logs")
-    .select("*")
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    console.error("FETCH VOICE LOGS ERROR:", error);
-    return [];
-  }
-
-  return data ?? [];
+  const res = await fetch("/api/job-logs", { method: "GET" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || "Failed to fetch logs.");
+  return data?.logs ?? [];
 }

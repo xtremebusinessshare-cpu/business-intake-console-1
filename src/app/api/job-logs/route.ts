@@ -10,6 +10,25 @@ function supabaseAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+export async function GET() {
+  try {
+    const supabase = supabaseAdmin();
+
+    const { data, error } = await supabase
+      .from("voice_logs")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return NextResponse.json({ error: error.message, details: error }, { status: 500 });
+    }
+
+    return NextResponse.json({ logs: data ?? [] }, { status: 200 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || "Unexpected error" }, { status: 500 });
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const supabase = supabaseAdmin();
@@ -26,18 +45,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const insertRow: any = {
-      company_context,
-      transcript,
-      source,
-    };
-
-    // only if you added job_summary column
-    insertRow.job_summary = transcript.slice(0, 120);
-
     const { data, error } = await supabase
       .from("voice_logs")
-      .insert(insertRow)
+      .insert({
+        company_context,
+        transcript,
+        source,
+      })
       .select("*")
       .single();
 
@@ -47,9 +61,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ log: data }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || "Unexpected error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || "Unexpected error" }, { status: 500 });
   }
 }
