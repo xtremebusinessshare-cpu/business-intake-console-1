@@ -16,16 +16,15 @@ export async function GET(
 ) {
   try {
     const supabase = supabaseAdmin();
-    const id = params.id;
 
     const { data, error } = await supabase
-      .from("job_logs")
+      .from("voice_logs")
       .select("*")
-      .eq("id", id)
+      .eq("id", params.id)
       .single();
 
     if (error || !data) {
-      return NextResponse.json({ error: "Job log not found." }, { status: 404 });
+      return NextResponse.json({ error: "Log not found." }, { status: 404 });
     }
 
     return NextResponse.json({ log: data }, { status: 200 });

@@ -4,7 +4,9 @@ import { createClient } from "@supabase/supabase-js";
 function supabaseAdmin() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars.");
+  if (!url || !key) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars.");
+  }
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
@@ -30,7 +32,8 @@ function extractFields(text: string) {
     .map((l) => l.replace(/^Action\s*:\s*/i, "").trim())
     .filter(Boolean);
 
-  const important = lines.some((l) => /^Important\s*:/i.test(l)) || /#important\b/i.test(text);
+  const important =
+    lines.some((l) => /^Important\s*:/i.test(l)) || /#important\b/i.test(text);
 
   return { priority, client, city, service, sqft, actions, important };
 }
@@ -50,8 +53,9 @@ function badge(text: string, tone: "dark" | "warn" | "info" = "info") {
 export default async function AdminVoicePage() {
   const supabase = supabaseAdmin();
 
+  // ✅ Correct table name
   const { data: logs, error } = await supabase
-    .from("job_logs")
+    .from("voice_logs")
     .select("*")
     .order("created_at", { ascending: false });
 
@@ -59,7 +63,7 @@ export default async function AdminVoicePage() {
     <main className="max-w-5xl mx-auto p-6 space-y-6">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Admin — Job Logs</h1>
+          <h1 className="text-2xl font-bold">Admin — Logs</h1>
           <p className="text-sm text-zinc-600">
             Notes + tasks + quote-ready details.
           </p>
@@ -79,14 +83,14 @@ export default async function AdminVoicePage() {
       </header>
 
       {error ? (
-        <p className="text-red-600">Failed to load job logs: {error.message}</p>
+        <p className="text-red-600">Failed to load logs: {error.message}</p>
       ) : !logs || logs.length === 0 ? (
-        <p className="text-zinc-500">No job logs yet.</p>
+        <p className="text-zinc-500">No logs yet.</p>
       ) : (
         <div className="space-y-4">
           {logs.map((log: any) => {
             const f = extractFields(log.transcript ?? "");
-            const src = (log.source ?? "unknown").toString();
+            const src = (log.source ?? "typed").toString();
 
             const priorityTone =
               (f.priority ?? "").toLowerCase().includes("high") ? "warn" : "info";
@@ -94,7 +98,7 @@ export default async function AdminVoicePage() {
             return (
               <div key={log.id} className="border rounded-xl p-4 bg-white space-y-2">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-semibold">
                       {log.company_context ?? "—"}
                     </p>
@@ -119,10 +123,26 @@ export default async function AdminVoicePage() {
 
                 {(f.client || f.city || f.service || f.sqft) && (
                   <div className="text-sm text-zinc-700 flex flex-wrap gap-x-4 gap-y-1">
-                    {f.client && <span><strong>Client:</strong> {f.client}</span>}
-                    {f.city && <span><strong>City:</strong> {f.city}</span>}
-                    {f.service && <span><strong>Service:</strong> {f.service}</span>}
-                    {f.sqft && <span><strong>SqFt:</strong> {f.sqft}</span>}
+                    {f.client && (
+                      <span>
+                        <strong>Client:</strong> {f.client}
+                      </span>
+                    )}
+                    {f.city && (
+                      <span>
+                        <strong>City:</strong> {f.city}
+                      </span>
+                    )}
+                    {f.service && (
+                      <span>
+                        <strong>Service:</strong> {f.service}
+                      </span>
+                    )}
+                    {f.sqft && (
+                      <span>
+                        <strong>SqFt:</strong> {f.sqft}
+                      </span>
+                    )}
                   </div>
                 )}
 

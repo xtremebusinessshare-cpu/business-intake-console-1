@@ -17,8 +17,6 @@ export async function POST(req: Request) {
 
     const company_context = (body?.company_context ?? "").toString();
     const transcript = (body?.transcript ?? "").toString();
-
-    // IMPORTANT: allow UI to set this
     const source = (body?.source ?? "typed").toString(); // "typed" | "voice"
 
     if (!company_context || !transcript.trim()) {
@@ -28,14 +26,18 @@ export async function POST(req: Request) {
       );
     }
 
+    const insertRow: any = {
+      company_context,
+      transcript,
+      source,
+    };
+
+    // only if you added job_summary column
+    insertRow.job_summary = transcript.slice(0, 120);
+
     const { data, error } = await supabase
-      .from("job_logs")
-      .insert({
-        company_context,
-        source,
-        transcript,
-        job_summary: transcript.slice(0, 120),
-      })
+      .from("voice_logs")
+      .insert(insertRow)
       .select("*")
       .single();
 
