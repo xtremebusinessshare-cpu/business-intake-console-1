@@ -54,23 +54,25 @@ function toNum(n: any) {
   return Number.isFinite(v) ? v : 0;
 }
 
-function supabaseServer() {
+function supabaseAdmin() {
   const url = process.env.SUPABASE_URL;
-  const anon = process.env.SUPABASE_ANON_KEY; // ✅ use anon for server-render reads (with RLS)
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!url || !anon) {
-    throw new Error("Missing SUPABASE_URL or SUPABASE_ANON_KEY env vars.");
+  if (!url || !key) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars.");
   }
 
-  return createClient(url, anon, { auth: { persistSession: false } });
+  return createClient(url, key, { auth: { persistSession: false } });
 }
+
 
 export default async function QuoteDetailPage({
   params,
 }: {
   params: { id: string };
 }) {
-  const supabase = supabaseServer();
+  const supabase = supabaseAdmin();
+
 
   // 1) Fetch quote
   const { data: quote, error: quoteErr } = await supabase
