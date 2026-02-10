@@ -129,17 +129,24 @@ export async function updateQuoteStatus(id: string, status: QuoteStatus) {
 export async function saveJobLog(payload: {
   company_context: string;
   transcript: string;
+  source?: "typed" | "voice";
 }) {
   const res = await fetch("/api/job-logs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      company_context: payload.company_context,
+      transcript: payload.transcript,
+      source: payload.source ?? "typed",
+    }),
   });
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || "Failed to save job log.");
-  return data;
+
+  return data?.log;
 }
+
 
 export async function fetchJobLogs() {
   const { data, error } = await supabase
