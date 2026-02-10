@@ -130,13 +130,15 @@ export async function saveJobLog(payload: {
   company_context: string;
   transcript: string;
 }) {
-  const { error } = await supabase.from("job_logs").insert({
-    company_context: payload.company_context,
-    source: "voice",
-    transcript: payload.transcript,
-    job_summary: payload.transcript.slice(0, 120),
+  const res = await fetch("/api/job-logs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
-  if (error) throw error;
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || "Failed to save job log.");
+  return data;
 }
 
 export async function fetchJobLogs() {
