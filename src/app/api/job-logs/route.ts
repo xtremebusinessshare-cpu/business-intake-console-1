@@ -3,47 +3,77 @@ import { createClient } from "@supabase/supabase-js";
 
 function supabaseAdmin() {
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars.");
-  return createClient(url, key, { auth: { persistSession: false } });
-}
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-function normalizeSource(x: any): "typed" | "voice" {
-  return x === "voice" ? "voice" : "typed";
+  if (!url || !serviceKey) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  }
+
+  return createClient(url, serviceKey, {
+    auth: { persistSession: false },
+  });
 }
 
 export async function POST(req: Request) {
   try {
-    const supabase = supabaseAdmin();
     const body = await req.json();
 
-    const company_context = body?.company_context ?? null;
-    const transcript = (body?.transcript ?? "").toString();
-    const source = normalizeSource(body?.source);
+    // These are the fields your frontend should send
+    const {
+      company_context,
+      transcript,
+      priority = "normal",
+      important = false,
+      client_name = null,
+      city = null,
+      service_type = null,
+      sqft = null,
+      source = "typed",
+      meta = null,
+    } = body ?? {};
 
-    if (!company_context) {
-      return NextResponse.json({ error: "company_context is required." }, { status: 400 });
-    }
-    if (!transcript.trim()) {
-      return NextResponse.json({ error: "transcript is required." }, { status: 400 });
+    // Hard fail if required fields are missing
+    if (!company_context || !transcript) {
+      return NextResponse.json(
+        { error: "company_context and transcript are required" },
+        { status: 400 }
+      );
     }
 
+    const supabase = supabaseAdmin();
+
+    // Insert into the CORRECT table: job_logs
     const { data, error } = await supabase
       .from("job_logs")
       .insert({
         company_context,
         transcript,
-        source, // ✅ use the incoming value (typed/voice)
+        priority,
+        important,
+        client_name,
+        city,
+        service_type,
+        sqft: sqft === "" ? null : sqft,
+        source,
+        meta,
       })
-      .select("*")
-      .single();
+      .select("*")     // IMPORTANT: this makes Supabase return the inserted row
+      .single();       // IMPORTANT: ensures `data` is a single object
 
+    // If Supabase failed, return an error (do NOT pretend success)
     if (error) {
-      return NextResponse.json({ error: error.message, details: error }, { status: 500 });
+      return NextResponse.json(
+        { error: error.message, details: error },
+        { status: 500 }
+      );
     }
 
+    // ✅ This is the key: return the inserted row INCLUDING ID
     return NextResponse.json({ log: data }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Unexpected error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? "Unknown error" },
+      { status: 500 }
+    );
   }
 }
