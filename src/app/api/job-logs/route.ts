@@ -42,35 +42,41 @@ export async function POST(req: Request) {
 
     const supabase = supabaseAdmin();
 
-    // Insert into the CORRECT table: job_logs
-   const { data, error } = await supabase
+    // Normalize sqft safely (handles "", null, undefined, "1200", 1200)
+const sqftNum =
+  sqft === "" || sqft === null || typeof sqft === "undefined"
+    ? null
+    : Number(String(sqft).replace(/[^\d.]/g, ""));
+
+const { data, error } = await supabase
   .from("job_logs")
   .insert({
     company_context,
     transcript,
-    source,
-    priority,
-    important,
-    client_name,
-    city,
-    service_type,
-    sqft: sqft === "" ? null : sqft,
+    source: source ?? "typed",
+    priority: priority ?? null,
+    important: important ?? false,
+    client_name: client_name ?? null,
+    city: city ?? null,
+    service_type: service_type ?? null,
+    sqft: sqft === "" || sqft === undefined ? null : sqft,
     meta: meta ?? {},
     job_summary: transcript ? String(transcript).slice(0, 120) : null,
-
   })
   .select("id, created_at")
   .single();
 
 if (error) {
   console.error("JOB LOG INSERT ERROR:", error);
-  return NextResponse.json(
-    { error: error.message, details: error },
-    { status: 500 }
-  );
+  return NextResponse.json({ error: error.message, details: error }, { status: 500 });
 }
 
-return NextResponse.json({ id: data.id, created_at: data.created_at }, { status: 200 });
+return NextResponse.json(
+  { log: { id: data.id, created_at: data.created_at } },
+  { status: 200 }
+);
+
+
 
 
     // ✅ This is the key: return the inserted row INCLUDING ID
