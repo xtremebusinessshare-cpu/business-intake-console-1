@@ -4,30 +4,34 @@ import { createClient } from "@supabase/supabase-js";
 function supabaseAdmin() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars.");
-  }
+  if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars.");
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-export async function GET() {
+export async function GET(
+  _req: Request,
+  { params }: { params: { id: string } }
+) {
   try {
     const supabase = supabaseAdmin();
 
     const { data, error } = await supabase
-      .from("voice_logs")
+      .from("job_logs")
       .select("*")
-      .order("created_at", { ascending: false });
+      .eq("id", params.id)
+      .single();
 
-    if (error) {
-      return NextResponse.json({ error: error.message, details: error }, { status: 500 });
+    if (error || !data) {
+      return NextResponse.json({ error: error?.message || "Log not found." }, { status: 404 });
     }
 
-    return NextResponse.json({ logs: data ?? [] }, { status: 200 });
+    // ✅ IMPORTANT: return the log at TOP LEVEL (not { log: data })
+    return NextResponse.json(data, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Unexpected error" }, { status: 500 });
   }
 }
+
 
 export async function POST(req: Request) {
   try {

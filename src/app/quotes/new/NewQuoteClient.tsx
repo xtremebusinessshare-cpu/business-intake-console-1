@@ -31,6 +31,25 @@ function money(n: number) {
   return v.toLocaleString(undefined, { style: "currency", currency: "USD" });
 }
 
+function extractFields(text: string) {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  const get = (label: string) => {
+    const rx = new RegExp(`^${label}\\s*:\\s*(.+)$`, "i");
+    const hit = lines.find((l) => rx.test(l));
+    if (!hit) return null;
+    return hit.replace(rx, "$1").trim() || null;
+  };
+
+  const client = get("Client") ?? get("Customer") ?? get("Name");
+  const city = get("City");
+  const service = get("Service") ?? get("Service Type");
+  const sqftRaw = get("SqFt") ?? get("Sq Ft") ?? get("Square Feet") ?? get("Square Footage");
+  const sqft = sqftRaw ? sqftRaw.replace(/[^\d.]/g, "") : null;
+
+  return { client, city, service, sqft };
+}
+
 const UNIT_OPTIONS: { value: Unit; label: string }[] = [
   { value: "sq_ft", label: "Sq Ft" },
   { value: "linear_ft", label: "Linear Ft" },
@@ -53,7 +72,7 @@ export default function NewQuoteClient() {
   const [jobAddress, setJobAddress] = useState("");
   const [notes, setNotes] = useState("");
 
-  // Limo meta (optional; only used when business = exquisite_limo)
+  // Limo meta
   const [pickup, setPickup] = useState("");
   const [dropoff, setDropoff] = useState("");
   const [serviceDate, setServiceDate] = useState("");
@@ -73,7 +92,7 @@ export default function NewQuoteClient() {
 
   const isLimo = business === "exquisite_limo";
 
-  // ✅ Prefill from job log: /quotes/new?logId=...
+  // ✅ Prefill from job log
   useEffect(() => {
     async function prefillFromLog() {
       if (!logId) return;
@@ -83,48 +102,69 @@ export default function NewQuoteClient() {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error || "Failed to load job log.");
 
-        const log = data?.log;
+        // Your API returns fields at top-level (id/company_context/transcript/...)
+        const log = data;
 
-        // Business
+        const transcript = (log?.transcript ?? "").toString();
+        const f = extractFields(transcript);
+
+        // Business + estimateType hint
         if (log?.company_context) {
           setBusiness(log.company_context as Business);
 
-          // Light guess for estimate type (editable)
           if (log.company_context === "exquisite_limo") setEstimateType("limo");
           else if (log.company_context === "gxs") setEstimateType("repairs");
           else setEstimateType("remediation");
         }
 
-        // Notes (append)
-        if (log?.transcript) {
+        // Notes: append transcript
+        if (transcript.trim()) {
           setNotes((prev) => {
             const header = `--- From Job Log (${logId}) ---\n`;
-            return prev?.trim()
-              ? `${prev}\n\n${header}${log.transcript}`
-              : `${header}${log.transcript}`;
+            return prev?.trim() ? `${prev}\n\n${header}${transcript}` : `${header}${transcript}`;
           });
+        }
 
-          // Optional: seed first service name (only if empty)
+        // Client: only fill if empty
+        if (f.client) {
+          setClientName((prev) => (prev.trim() ? prev : f.client!));
+        }
+
+        // Job address: seed with city only if empty and not limo
+        if (!isLimo && f.city) {
+          setJobAddress((prev) => (prev.trim() ? prev : f.city!));
+        }
+
+        // First service name: only fill if empty
+        if (f.service) {
           setServices((prev) => {
             if (!prev?.length) return prev;
             if (prev[0].name?.trim()) return prev;
-            const firstLine = String(log.transcript)
-              .split("\n")
-              .map((x: string) => x.trim())
-              .find((x: string) => x.length > 0);
-            if (!firstLine) return prev;
-            return prev.map((li, idx) =>
-              idx === 0 ? { ...li, name: firstLine.slice(0, 80) } : li
-            );
+            const first = prev[0];
+            return [{ ...first, name: f.service!.slice(0, 100) }, ...prev.slice(1)];
           });
         }
+
+        // SqFt -> qty (only if unit is sq_ft and qty is empty)
+        if (f.sqft) {
+          const sqftNum = Number(f.sqft);
+          if (Number.isFinite(sqftNum) && sqftNum > 0) {
+            setServices((prev) => {
+              if (!prev?.length) return prev;
+              const first = prev[0];
+              if (first.unit !== "sq_ft") return prev;
+              if (first.qty && first.qty > 0) return prev;
+              return [{ ...first, qty: sqftNum }, ...prev.slice(1)];
+            });
+          }
+        }
       } catch (e) {
-        // Keep quiet; user can still create quote normally
         console.error("Prefill from log failed:", e);
       }
     }
 
     prefillFromLog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logId]);
 
   const servicesSubtotal = useMemo(
@@ -135,10 +175,7 @@ export default function NewQuoteClient() {
     () => addons.reduce((sum, li) => sum + (li.qty || 0) * (li.unitPrice || 0), 0),
     [addons]
   );
-  const total = useMemo(
-    () => servicesSubtotal + addonsSubtotal,
-    [servicesSubtotal, addonsSubtotal]
-  );
+  const total = useMemo(() => servicesSubtotal + addonsSubtotal, [servicesSubtotal, addonsSubtotal]);
 
   function updateLine(kind: "services" | "addons", id: string, patch: Partial<LineItem>) {
     const setter = kind === "services" ? setServices : setAddons;
@@ -160,15 +197,13 @@ export default function NewQuoteClient() {
     const hasService = services.some((s) => s.name.trim() && (s.qty ?? 0) > 0);
     if (!hasService) return "Add at least one service with a name and quantity > 0.";
 
-    if (!isLimo && jobAddress.trim().length < 5) return "Job address is required.";
+    if (!isLimo && jobAddress.trim().length < 2) return "Job address (or at least city) is required.";
 
     if (isLimo) {
       if (pickup.trim().length < 3) return "Pickup is required.";
       if (!serviceDate) return "Service date is required.";
       if (!startTime) return "Start time is required.";
-      if ((estHours ?? 0) <= 0 && (estMiles ?? 0) <= 0) {
-        return "Enter estimated hours or estimated miles.";
-      }
+      if ((estHours ?? 0) <= 0 && (estMiles ?? 0) <= 0) return "Enter estimated hours or estimated miles.";
     }
 
     return null;
@@ -190,16 +225,7 @@ export default function NewQuoteClient() {
         notes: notes || null,
 
         limo: isLimo
-          ? {
-              pickup,
-              dropoff,
-              serviceDate,
-              startTime,
-              vehicleType,
-              passengers,
-              estHours,
-              estMiles,
-            }
+          ? { pickup, dropoff, serviceDate, startTime, vehicleType, passengers, estHours, estMiles }
           : undefined,
 
         services: services.map((s) => ({
@@ -218,11 +244,7 @@ export default function NewQuoteClient() {
           lineTotal: (a.qty || 0) * (a.unitPrice || 0),
         })),
 
-        totals: {
-          servicesSubtotal,
-          addonsSubtotal,
-          total,
-        },
+        totals: { servicesSubtotal, addonsSubtotal, total },
 
         disclaimerText:
           "This is a preliminary estimate only, not a final invoice/contract. Final pricing may change after inspection and scope confirmation.",
@@ -294,96 +316,49 @@ export default function NewQuoteClient() {
               className="mt-1 w-full rounded-lg border p-2"
               value={jobAddress}
               onChange={(e) => setJobAddress(e.target.value)}
-              placeholder="123 Main St, City, State"
+              placeholder="123 Main St, City, State (or City only)"
             />
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="md:col-span-2">
               <label className="text-sm font-medium">Pickup</label>
-              <input
-                className="mt-1 w-full rounded-lg border p-2"
-                value={pickup}
-                onChange={(e) => setPickup(e.target.value)}
-              />
+              <input className="mt-1 w-full rounded-lg border p-2" value={pickup} onChange={(e) => setPickup(e.target.value)} />
             </div>
             <div>
               <label className="text-sm font-medium">Dropoff</label>
-              <input
-                className="mt-1 w-full rounded-lg border p-2"
-                value={dropoff}
-                onChange={(e) => setDropoff(e.target.value)}
-              />
+              <input className="mt-1 w-full rounded-lg border p-2" value={dropoff} onChange={(e) => setDropoff(e.target.value)} />
             </div>
             <div>
               <label className="text-sm font-medium">Date</label>
-              <input
-                type="date"
-                className="mt-1 w-full rounded-lg border p-2"
-                value={serviceDate}
-                onChange={(e) => setServiceDate(e.target.value)}
-              />
+              <input type="date" className="mt-1 w-full rounded-lg border p-2" value={serviceDate} onChange={(e) => setServiceDate(e.target.value)} />
             </div>
             <div>
               <label className="text-sm font-medium">Start time</label>
-              <input
-                type="time"
-                className="mt-1 w-full rounded-lg border p-2"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-              />
+              <input type="time" className="mt-1 w-full rounded-lg border p-2" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
             </div>
             <div>
               <label className="text-sm font-medium">Vehicle</label>
-              <input
-                className="mt-1 w-full rounded-lg border p-2"
-                value={vehicleType}
-                onChange={(e) => setVehicleType(e.target.value)}
-              />
+              <input className="mt-1 w-full rounded-lg border p-2" value={vehicleType} onChange={(e) => setVehicleType(e.target.value)} />
             </div>
             <div>
               <label className="text-sm font-medium">Passengers</label>
-              <input
-                type="number"
-                min={1}
-                className="mt-1 w-full rounded-lg border p-2"
-                value={passengers}
-                onChange={(e) => setPassengers(Number(e.target.value || 1))}
-              />
+              <input type="number" min={1} className="mt-1 w-full rounded-lg border p-2" value={passengers} onChange={(e) => setPassengers(Number(e.target.value || 1))} />
             </div>
             <div>
               <label className="text-sm font-medium">Est hours</label>
-              <input
-                type="number"
-                min={0}
-                step={0.25}
-                className="mt-1 w-full rounded-lg border p-2"
-                value={estHours}
-                onChange={(e) => setEstHours(Number(e.target.value || 0))}
-              />
+              <input type="number" min={0} step={0.25} className="mt-1 w-full rounded-lg border p-2" value={estHours} onChange={(e) => setEstHours(Number(e.target.value || 0))} />
             </div>
             <div>
               <label className="text-sm font-medium">Est miles</label>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                className="mt-1 w-full rounded-lg border p-2"
-                value={estMiles}
-                onChange={(e) => setEstMiles(Number(e.target.value || 0))}
-              />
+              <input type="number" min={0} step={1} className="mt-1 w-full rounded-lg border p-2" value={estMiles} onChange={(e) => setEstMiles(Number(e.target.value || 0))} />
             </div>
           </div>
         )}
 
         <div>
           <label className="text-sm font-medium">Notes (optional)</label>
-          <textarea
-            className="mt-1 w-full rounded-lg border p-2"
-            rows={3}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
+          <textarea className="mt-1 w-full rounded-lg border p-2" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
       </div>
 
@@ -391,11 +366,7 @@ export default function NewQuoteClient() {
       <div className="rounded-xl border p-4 bg-white space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Services</h2>
-          <button
-            className="rounded-lg bg-gray-900 text-white px-3 py-2 text-sm"
-            onClick={() => addLine("services")}
-            type="button"
-          >
+          <button className="rounded-lg bg-gray-900 text-white px-3 py-2 text-sm" onClick={() => addLine("services")} type="button">
             + Add Service
           </button>
         </div>
@@ -404,20 +375,12 @@ export default function NewQuoteClient() {
           <div key={s.id} className="grid grid-cols-1 md:grid-cols-12 gap-3 border rounded-lg p-3">
             <div className="md:col-span-5">
               <label className="text-xs font-medium text-gray-600">Service</label>
-              <input
-                className="mt-1 w-full rounded-lg border p-2"
-                value={s.name}
-                onChange={(e) => updateLine("services", s.id, { name: e.target.value })}
-              />
+              <input className="mt-1 w-full rounded-lg border p-2" value={s.name} onChange={(e) => updateLine("services", s.id, { name: e.target.value })} />
             </div>
 
             <div className="md:col-span-2">
               <label className="text-xs font-medium text-gray-600">Unit</label>
-              <select
-                className="mt-1 w-full rounded-lg border p-2 bg-white"
-                value={s.unit}
-                onChange={(e) => updateLine("services", s.id, { unit: e.target.value as Unit })}
-              >
+              <select className="mt-1 w-full rounded-lg border p-2 bg-white" value={s.unit} onChange={(e) => updateLine("services", s.id, { unit: e.target.value as Unit })}>
                 {UNIT_OPTIONS.map((u) => (
                   <option key={u.value} value={u.value}>
                     {u.label}
@@ -428,28 +391,12 @@ export default function NewQuoteClient() {
 
             <div className="md:col-span-2">
               <label className="text-xs font-medium text-gray-600">Qty</label>
-              <input
-                type="number"
-                min={0}
-                step={0.01}
-                className="mt-1 w-full rounded-lg border p-2"
-                value={s.qty}
-                onChange={(e) => updateLine("services", s.id, { qty: Number(e.target.value || 0) })}
-              />
+              <input type="number" min={0} step={0.01} className="mt-1 w-full rounded-lg border p-2" value={s.qty} onChange={(e) => updateLine("services", s.id, { qty: Number(e.target.value || 0) })} />
             </div>
 
             <div className="md:col-span-2">
               <label className="text-xs font-medium text-gray-600">Amount / Unit</label>
-              <input
-                type="number"
-                min={0}
-                step={0.01}
-                className="mt-1 w-full rounded-lg border p-2"
-                value={s.unitPrice}
-                onChange={(e) =>
-                  updateLine("services", s.id, { unitPrice: Number(e.target.value || 0) })
-                }
-              />
+              <input type="number" min={0} step={0.01} className="mt-1 w-full rounded-lg border p-2" value={s.unitPrice} onChange={(e) => updateLine("services", s.id, { unitPrice: Number(e.target.value || 0) })} />
             </div>
 
             <div className="md:col-span-1 flex items-end justify-end">
@@ -480,11 +427,7 @@ export default function NewQuoteClient() {
       <div className="rounded-xl border p-4 bg-white space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Add-ons (optional)</h2>
-          <button
-            className="rounded-lg bg-gray-100 px-3 py-2 text-sm"
-            onClick={() => addLine("addons")}
-            type="button"
-          >
+          <button className="rounded-lg bg-gray-100 px-3 py-2 text-sm" onClick={() => addLine("addons")} type="button">
             + Add Add-on
           </button>
         </div>
@@ -496,20 +439,12 @@ export default function NewQuoteClient() {
             <div key={a.id} className="grid grid-cols-1 md:grid-cols-12 gap-3 border rounded-lg p-3">
               <div className="md:col-span-5">
                 <label className="text-xs font-medium text-gray-600">Add-on</label>
-                <input
-                  className="mt-1 w-full rounded-lg border p-2"
-                  value={a.name}
-                  onChange={(e) => updateLine("addons", a.id, { name: e.target.value })}
-                />
+                <input className="mt-1 w-full rounded-lg border p-2" value={a.name} onChange={(e) => updateLine("addons", a.id, { name: e.target.value })} />
               </div>
 
               <div className="md:col-span-2">
                 <label className="text-xs font-medium text-gray-600">Unit</label>
-                <select
-                  className="mt-1 w-full rounded-lg border p-2 bg-white"
-                  value={a.unit}
-                  onChange={(e) => updateLine("addons", a.id, { unit: e.target.value as Unit })}
-                >
+                <select className="mt-1 w-full rounded-lg border p-2 bg-white" value={a.unit} onChange={(e) => updateLine("addons", a.id, { unit: e.target.value as Unit })}>
                   {UNIT_OPTIONS.map((u) => (
                     <option key={u.value} value={u.value}>
                       {u.label}
@@ -520,36 +455,16 @@ export default function NewQuoteClient() {
 
               <div className="md:col-span-2">
                 <label className="text-xs font-medium text-gray-600">Qty</label>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  className="mt-1 w-full rounded-lg border p-2"
-                  value={a.qty}
-                  onChange={(e) => updateLine("addons", a.id, { qty: Number(e.target.value || 0) })}
-                />
+                <input type="number" min={0} step={0.01} className="mt-1 w-full rounded-lg border p-2" value={a.qty} onChange={(e) => updateLine("addons", a.id, { qty: Number(e.target.value || 0) })} />
               </div>
 
               <div className="md:col-span-2">
                 <label className="text-xs font-medium text-gray-600">Amount / Unit</label>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  className="mt-1 w-full rounded-lg border p-2"
-                  value={a.unitPrice}
-                  onChange={(e) =>
-                    updateLine("addons", a.id, { unitPrice: Number(e.target.value || 0) })
-                  }
-                />
+                <input type="number" min={0} step={0.01} className="mt-1 w-full rounded-lg border p-2" value={a.unitPrice} onChange={(e) => updateLine("addons", a.id, { unitPrice: Number(e.target.value || 0) })} />
               </div>
 
               <div className="md:col-span-1 flex items-end justify-end">
-                <button
-                  type="button"
-                  className="text-sm text-red-600"
-                  onClick={() => removeLine("addons", a.id)}
-                >
+                <button type="button" className="text-sm text-red-600" onClick={() => removeLine("addons", a.id)}>
                   Remove
                 </button>
               </div>

@@ -6,6 +6,7 @@ import { saveJobLog } from "@/lib/supabaseClient";
 
 type CompanyContext = "xes" | "gxs" | "exquisite_limo";
 type Priority = "Low" | "Medium" | "High";
+type LogType = "typed" | "voice";
 
 function buildTranscript(input: {
   priority: Priority;
@@ -19,9 +20,7 @@ function buildTranscript(input: {
 }) {
   const lines: string[] = [];
 
-  // Always include priority (helps sorting)
   lines.push(`Priority: ${input.priority}`);
-
   if (input.important) lines.push(`Important: Yes`);
 
   if (input.client.trim()) lines.push(`Client: ${input.client.trim()}`);
@@ -29,7 +28,6 @@ function buildTranscript(input: {
   if (input.service.trim()) lines.push(`Service: ${input.service.trim()}`);
   if (input.sqft.trim()) lines.push(`SqFt: ${input.sqft.trim()}`);
 
-  // Actions become a task list
   input.actions
     .map((a) => a.trim())
     .filter(Boolean)
@@ -46,9 +44,11 @@ function buildTranscript(input: {
 export default function VoiceJobLoggerPage() {
   const [companyContext, setCompanyContext] = useState<CompanyContext>("xes");
 
-  // Structured fields (typed form)
   const [priority, setPriority] = useState<Priority>("Medium");
   const [important, setImportant] = useState(false);
+
+  // ✅ FIX: allow user to mark the log as typed vs voice (even if pasted/typed)
+  const [logType, setLogType] = useState<LogType>("typed");
 
   const [client, setClient] = useState("");
   const [city, setCity] = useState("");
@@ -97,11 +97,13 @@ export default function VoiceJobLoggerPage() {
       await saveJobLog({
         company_context: companyContext,
         transcript: transcriptPreview,
-        source: "typed",
+        // ✅ FIX: use selected logType
+        source: logType,
       });
 
       setSavedMsg("Saved. You can view it in Logs.");
-      // reset (keep company + priority)
+
+      // Reset (keep business + priority + logType)
       setImportant(false);
       setClient("");
       setCity("");
@@ -131,7 +133,10 @@ export default function VoiceJobLoggerPage() {
           <Link href="/" className="px-4 py-2 rounded bg-zinc-100 font-semibold">
             Home
           </Link>
-          <Link href="/admin/voice" className="px-4 py-2 rounded bg-black text-white font-semibold">
+          <Link
+            href="/admin/voice"
+            className="px-4 py-2 rounded bg-black text-white font-semibold"
+          >
             View Logs
           </Link>
         </div>
@@ -145,15 +150,16 @@ export default function VoiceJobLoggerPage() {
           <li>Enter client/service/sqft when you want to convert into a quote later.</li>
           <li>Use Actions for reminders: “find invoice”, “adjust water meter”, “check shelves”.</li>
           <li>Mark Important + set Priority so you can sort and focus fast in Logs.</li>
+          <li>Use <strong>Log type</strong> to label the entry as typed or voice (voice can be pasted transcript for now).</li>
         </ul>
         <p className="text-xs text-zinc-500">
-          Tip: This will store everything as one transcript so it stays flexible now and can become “enterprise smart” later.
+          Tip: Everything is stored as one transcript so it stays flexible now and can become “enterprise smart” later.
         </p>
       </div>
 
       {/* Form */}
       <div className="rounded-xl border bg-white p-4 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
             <label className="text-sm font-medium">Business</label>
             <select
@@ -164,6 +170,18 @@ export default function VoiceJobLoggerPage() {
               <option value="xes">XES</option>
               <option value="gxs">GXS</option>
               <option value="exquisite_limo">Exquisite Limo</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium">Log type</label>
+            <select
+              className="mt-1 w-full rounded-lg border p-2"
+              value={logType}
+              onChange={(e) => setLogType(e.target.value as LogType)}
+            >
+              <option value="typed">Typed</option>
+              <option value="voice">Voice</option>
             </select>
           </div>
 
@@ -195,19 +213,36 @@ export default function VoiceJobLoggerPage() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
             <label className="text-sm font-medium">Client (optional)</label>
-            <input className="mt-1 w-full rounded-lg border p-2" value={client} onChange={(e) => setClient(e.target.value)} />
+            <input
+              className="mt-1 w-full rounded-lg border p-2"
+              value={client}
+              onChange={(e) => setClient(e.target.value)}
+            />
           </div>
           <div>
             <label className="text-sm font-medium">City (optional)</label>
-            <input className="mt-1 w-full rounded-lg border p-2" value={city} onChange={(e) => setCity(e.target.value)} />
+            <input
+              className="mt-1 w-full rounded-lg border p-2"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+            />
           </div>
           <div>
             <label className="text-sm font-medium">Service (optional)</label>
-            <input className="mt-1 w-full rounded-lg border p-2" value={service} onChange={(e) => setService(e.target.value)} />
+            <input
+              className="mt-1 w-full rounded-lg border p-2"
+              value={service}
+              onChange={(e) => setService(e.target.value)}
+            />
           </div>
           <div>
             <label className="text-sm font-medium">SqFt (optional)</label>
-            <input className="mt-1 w-full rounded-lg border p-2" value={sqft} onChange={(e) => setSqft(e.target.value)} placeholder="e.g. 1200" />
+            <input
+              className="mt-1 w-full rounded-lg border p-2"
+              value={sqft}
+              onChange={(e) => setSqft(e.target.value)}
+              placeholder="e.g. 1200"
+            />
           </div>
         </div>
 
