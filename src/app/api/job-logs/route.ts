@@ -43,30 +43,35 @@ export async function POST(req: Request) {
     const supabase = supabaseAdmin();
 
     // Insert into the CORRECT table: job_logs
-    const { data, error } = await supabase
-      .from("job_logs")
-      .insert({
-        company_context,
-        transcript,
-        priority,
-        important,
-        client_name,
-        city,
-        service_type,
-        sqft: sqft === "" ? null : sqft,
-        source,
-        meta,
-      })
-      .select("*")     // IMPORTANT: this makes Supabase return the inserted row
-      .single();       // IMPORTANT: ensures `data` is a single object
+   const { data, error } = await supabase
+  .from("job_logs")
+  .insert({
+    company_context,
+    transcript,
+    source,
+    priority,
+    important,
+    client_name,
+    city,
+    service_type,
+    sqft: sqft === "" ? null : sqft,
+    meta: meta ?? {},
+    job_summary: transcript ? String(transcript).slice(0, 120) : null,
 
-    // If Supabase failed, return an error (do NOT pretend success)
-    if (error) {
-      return NextResponse.json(
-        { error: error.message, details: error },
-        { status: 500 }
-      );
-    }
+  })
+  .select("id, created_at")
+  .single();
+
+if (error) {
+  console.error("JOB LOG INSERT ERROR:", error);
+  return NextResponse.json(
+    { error: error.message, details: error },
+    { status: 500 }
+  );
+}
+
+return NextResponse.json({ id: data.id, created_at: data.created_at }, { status: 200 });
+
 
     // ✅ This is the key: return the inserted row INCLUDING ID
     return NextResponse.json({ log: data }, { status: 200 });

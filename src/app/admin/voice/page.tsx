@@ -55,7 +55,7 @@ export default async function AdminVoicePage() {
 
   // ✅ Correct table name
   const { data: logs, error } = await supabase
-    .from("voice_logs")
+    .from("job_logs")
     .select("*")
     .order("created_at", { ascending: false });
 
