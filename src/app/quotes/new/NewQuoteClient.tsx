@@ -14,6 +14,15 @@ type LineItem = {
   unitPrice: number;
 };
 
+type PriceBookItem = {
+  id: string;
+  label: string;
+  service_name: string;
+  unit: Unit;
+  default_unit_price: number;
+  category?: string | null;
+};
+
 function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
@@ -98,10 +107,36 @@ export default function NewQuoteClient() {
   ]);
   const [addons, setAddons] = useState<LineItem[]>([]);
 
+  // ✅ Price book
+  const [priceBook, setPriceBook] = useState<PriceBookItem[]>([]);
+  const [priceBookLoading, setPriceBookLoading] = useState(false);
+  const [priceBookError, setPriceBookError] = useState<string | null>(null);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isLimo = business === "exquisite_limo";
+
+  // ✅ Load price book when business changes
+  useEffect(() => {
+    async function loadPriceBook() {
+      setPriceBookError(null);
+      setPriceBookLoading(true);
+      try {
+        const res = await fetch(`/api/services?business=${business}`, { method: "GET" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || "Failed to load services.");
+        setPriceBook((data?.services ?? []) as PriceBookItem[]);
+      } catch (e: any) {
+        setPriceBook([]);
+        setPriceBookError(e?.message || "Failed to load services.");
+      } finally {
+        setPriceBookLoading(false);
+      }
+    }
+
+    loadPriceBook();
+  }, [business]);
 
   // ✅ Prefill from Job Log (/quotes/new?logId=...)
   useEffect(() => {
@@ -173,7 +208,6 @@ export default function NewQuoteClient() {
     }
 
     prefillFromLog();
-    // Intentionally only rerun when logId changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logId]);
 
@@ -441,6 +475,75 @@ export default function NewQuoteClient() {
         </div>
       </div>
 
+      {/* ✅ Price Book quick-add */}
+      <div className="rounded-xl border p-4 bg-white space-y-2">
+        <div>
+          <h2 className="text-lg font-semibold">Price Book</h2>
+          <p className="text-sm text-zinc-600">
+            Pick a service to auto-fill a quote line (name, unit, and default price).
+          </p>
+        </div>
+
+        {priceBookLoading ? (
+          <p className="text-sm text-zinc-600">Loading services…</p>
+        ) : priceBookError ? (
+          <p className="text-sm text-red-600">{priceBookError}</p>
+        ) : priceBook.length === 0 ? (
+          <p className="text-sm text-zinc-600">No services found for this business yet.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+            <div className="md:col-span-10">
+              <label className="text-sm font-medium">Add service</label>
+              <select
+                className="mt-1 w-full rounded-lg border p-2 bg-white"
+                defaultValue=""
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (!id) return;
+
+                  const item = priceBook.find((x) => x.id === id);
+                  if (!item) return;
+
+                  setServices((prev) => [
+                    ...prev,
+                    {
+                      id: uid(),
+                      name: item.service_name,
+                      unit: item.unit,
+                      qty: item.unit === "flat" ? 1 : 0,
+                      unitPrice: Number(item.default_unit_price || 0),
+                    },
+                  ]);
+
+                  e.currentTarget.value = "";
+                }}
+              >
+                <option value="">Select a service…</option>
+                {priceBook.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label} — {money(Number(s.default_unit_price || 0))}/{s.unit}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="md:col-span-2">
+              <button
+                type="button"
+                className="w-full rounded-lg bg-zinc-100 px-3 py-2 text-sm font-semibold"
+                onClick={() => addLine("services")}
+              >
+                + Blank line
+              </button>
+            </div>
+          </div>
+        )}
+
+        <p className="text-xs text-zinc-500">
+          Starter pricing can be updated later (we’ll build an Admin editor next).
+        </p>
+      </div>
+
       {/* Services */}
       <div className="rounded-xl border p-4 bg-white space-y-3">
         <div className="flex items-center justify-between">
@@ -625,14 +728,32 @@ export default function NewQuoteClient() {
             <p className="text-2xl font-bold">{money(total)}</p>
           </div>
 
-          <button
-            type="button"
-            className="rounded-lg bg-gray-900 text-white px-4 py-3 font-medium disabled:opacity-60"
-            disabled={saving}
-            onClick={onSave}
-          >
-            {saving ? "Saving…" : "Save Quote"}
-          </button>
+<button
+  type="button"
+  className="rounded-lg bg-gray-900 text-white px-4 py-3 font-medium disabled:opacity-60"
+  disabled={saving}
+  onClick={(e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onSave();
+  }}
+>
+  {saving ? "Saving…" : "Save Quote"}
+</button>
+
+{saving && (
+  <button
+    type="button"
+    className="ml-3 rounded-lg bg-gray-100 px-3 py-3 text-sm font-medium"
+    onClick={() => {
+      // emergency “unstick” button if something goes wrong
+      setSaving(false);
+      setError("Save was reset. Click Save Quote again.");
+    }}
+  >
+    Reset Save
+  </button>
+)}
         </div>
 
         {error && (
@@ -644,3 +765,4 @@ export default function NewQuoteClient() {
     </main>
   );
 }
+          

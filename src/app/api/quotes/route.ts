@@ -30,18 +30,105 @@ function toNumber(x: any, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// ---------- Quote number helpers ----------
+function pad4(n: number) {
+  return String(n).padStart(4, "0");
+}
+
+function yyyymmddUTC(d = new Date()) {
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}`;
+}
+
+function businessCode(companyContext: string) {
+  if (companyContext === "xes") return "XES";
+  if (companyContext === "gxs") return "GXS";
+  if (companyContext === "exquisite_limo") return "ELT"; // ✅ per your choice
+  return "BIZ";
+}
+
+async function generateNextQuoteNumber(supabase: ReturnType<typeof supabaseAdmin>, company_context: string) {
+  const biz = businessCode(company_context);
+  const day = yyyymmddUTC();
+  const prefix = `BIC-${biz}-${day}-`;
+
+  // Find latest for this prefix
+  const { data: last, error: lastErr } = await supabase
+    .from("quotes")
+    .select("quote_number")
+    .like("quote_number", `${prefix}%`)
+    .order("quote_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (lastErr) throw lastErr;
+
+  let nextSeq = 1;
+  if (last?.quote_number) {
+    const tail = String(last.quote_number).replace(prefix, "");
+    const n = Number(tail);
+    if (Number.isFinite(n) && n > 0) nextSeq = n + 1;
+  }
+
+  return { prefix, nextSeq, quote_number: `${prefix}${pad4(nextSeq)}` };
+}
+
+async function assignQuoteNumberWithRetry(
+  supabase: ReturnType<typeof supabaseAdmin>,
+  quoteId: string,
+  company_context: string
+) {
+  // If you ever re-run, don’t overwrite an existing quote_number.
+  const { data: existing } = await supabase
+    .from("quotes")
+    .select("quote_number")
+    .eq("id", quoteId)
+    .maybeSingle();
+
+  if (existing?.quote_number) return existing.quote_number as string;
+
+  const { prefix, nextSeq } = await generateNextQuoteNumber(supabase, company_context);
+
+  // Try a few times in case two quotes are created at the same time.
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const candidate = `${prefix}${pad4(nextSeq + attempt)}`;
+
+    const { error: upErr } = await supabase
+      .from("quotes")
+      .update({ quote_number: candidate })
+      .eq("id", quoteId);
+
+    if (!upErr) return candidate;
+
+    // If it's a unique constraint conflict, try next number.
+    // Supabase error messages vary; we do a safe string check.
+    const msg = String((upErr as any)?.message ?? "");
+    const isUniqueConflict =
+      msg.toLowerCase().includes("duplicate") ||
+      msg.toLowerCase().includes("unique") ||
+      msg.toLowerCase().includes("quote_number");
+
+    if (!isUniqueConflict) throw upErr;
+  }
+
+  throw new Error("Could not assign a unique quote_number after multiple attempts.");
+}
+
 export async function POST(req: Request) {
   try {
     const supabase = supabaseAdmin();
-
-
     const body = await req.json();
 
     // --- Core quote fields ---
     const status = (body?.status ?? "NEW") as string;
 
-    // UI sends business; your DB uses company_context
+    // UI sends business; DB uses company_context
     const company_context = (body?.business ?? body?.company_context ?? null) as string | null;
+    if (!company_context) {
+      return NextResponse.json({ error: "business/company_context is required" }, { status: 400 });
+    }
 
     // UI sends estimateType; DB uses estimate_type
     const estimate_type = (body?.estimateType ?? body?.estimate_type) as string | undefined;
@@ -77,7 +164,6 @@ export async function POST(req: Request) {
       | null;
 
     // --- Metadata stored in quotes.addons (jsonb) ---
-    // This is NOT the same as add-on line items; those go into quote_addons/limo_addons.
     const meta: Record<string, any> = {
       estimate_context: {
         company_context,
@@ -86,18 +172,15 @@ export async function POST(req: Request) {
       },
     };
 
-    // Optional contextual fields from UI
     if (body?.jobAddress) meta.job_address = body.jobAddress;
     if (body?.lossType) meta.loss_type = body.lossType;
 
-    // Limo-specific metadata (because your quotes table doesn't have pickup/dropoff/date/time columns)
     if (body?.limo && typeof body.limo === "object") meta.limo = body.limo;
 
     // --- Normalize services & addons arrays ---
     const rawServices: IncomingLine[] = Array.isArray(body?.services) ? body.services : [];
     const rawAddons: IncomingLine[] = Array.isArray(body?.addons) ? body.addons : [];
 
-    // If limo, push vehicle_type/passenger_count into each service record
     const limoVehicleType = body?.limo?.vehicleType ?? null;
     const limoPassengerCount =
       typeof body?.limo?.passengers === "number" ? body.limo.passengers : null;
@@ -146,8 +229,8 @@ export async function POST(req: Request) {
       })
       .filter((a) => a.extra_type.length > 0 && a.unit.length > 0 && a.quantity > 0);
 
-    // --- Call RPC (single transaction, auto routes to limo tables if company_context = exquisite_limo) ---
-    const { data, error } = await supabase.rpc("create_quote_with_items", {
+    // --- Call RPC (single transaction that creates quote + items) ---
+    const { data: quoteId, error } = await supabase.rpc("create_quote_with_items", {
       p_quote: {
         estimate_type,
         client_name,
@@ -171,7 +254,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: error.message, details: error }, { status: 500 });
     }
 
-    return NextResponse.json({ id: data }, { status: 200 });
+    // ✅ Assign BIC quote number AFTER creation (no RPC changes required)
+    const quote_number = await assignQuoteNumberWithRetry(
+      supabase,
+      String(quoteId),
+      company_context
+    );
+
+    return NextResponse.json({ id: quoteId, quote_number }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Unexpected error" }, { status: 500 });
   }

@@ -1,66 +1,113 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import Link from "next/link";
-import { fetchAllQuotes } from "@/lib/supabaseClient";
+import { createClient } from "@supabase/supabase-js";
+
+function supabaseAdmin() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars.");
+  }
+
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+function badge(text: string, tone: "dark" | "warn" | "info" = "info") {
+  const base = "inline-flex items-center px-2 py-1 rounded text-xs font-semibold";
+  const cls =
+    tone === "dark"
+      ? `${base} bg-black text-white`
+      : tone === "warn"
+      ? `${base} bg-amber-100 text-amber-900`
+      : `${base} bg-zinc-100 text-zinc-800`;
+
+  return <span className={cls}>{text}</span>;
+}
 
 export default async function AdminQuotesPage() {
-  const quotes = await fetchAllQuotes();
+  const supabase = supabaseAdmin();
+
+  const { data: quotes, error } = await supabase
+    .from("quotes")
+    .select("id, quote_number, created_at, company_context, estimate_type, client_name, status, estimated_total, total")
+    .order("created_at", { ascending: false });
 
   return (
-    <main className="min-h-screen bg-zinc-50 p-8">
-      <div className="max-w-6xl mx-auto">
+    <main className="max-w-6xl mx-auto p-6 space-y-6">
+      <header className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Admin — Quotes</h1>
+          <p className="text-sm text-zinc-600">All submitted quotes (most recent first).</p>
+        </div>
 
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold">Submitted Quotes</h1>
-          <p className="text-zinc-600 mt-2">
-            Internal view of all preliminary estimates
+        <div className="flex gap-2">
+          <Link href="/admin" className="px-4 py-2 rounded bg-zinc-100 font-semibold">
+            Back to Admin
+          </Link>
+          <Link href="/quotes/new" className="px-4 py-2 rounded bg-black text-white font-semibold">
+            New Quote
+          </Link>
+        </div>
+      </header>
+
+      {error ? (
+        <p className="text-red-600">Failed to load quotes: {error.message}</p>
+      ) : !quotes || quotes.length === 0 ? (
+        <div className="rounded-xl border bg-white p-4">
+          <p className="text-zinc-700 font-semibold">No quotes submitted yet.</p>
+          <p className="text-sm text-zinc-600 mt-1">
+            If you just saved one, this page should show it immediately once deployed.
           </p>
-        </header>
-
-        {quotes.length === 0 ? (
-          <div className="bg-white border rounded-xl p-6">
-            No quotes submitted yet.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {quotes.map((quote) => (
-              <Link
-                key={quote.id}
-                href={`/admin/quotes/${quote.id}`}
-                className="block bg-white border rounded-xl p-5 hover:shadow-md transition"
-              >
-                <div className="flex justify-between items-center">
-                  
-                  <div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {quotes.map((q: any) => (
+            <div key={q.id} className="border rounded-xl p-4 bg-white">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
                     <p className="font-semibold">
-                      {quote.company_context} — {quote.estimate_type}
+                      {q.quote_number ? q.quote_number : q.id}
                     </p>
-
-                    <p className="text-sm text-zinc-600">
-                      {new Date(quote.created_at).toLocaleDateString()}
-                    </p>
+                    {q.status ? badge(String(q.status), "info") : null}
+                    {q.company_context ? badge(String(q.company_context).toUpperCase(), "dark") : null}
+                    {q.estimate_type ? badge(String(q.estimate_type), "info") : null}
                   </div>
 
-                  <div className="text-right">
-                    <p className="font-bold">
-                    {Number(quote.estimated_total ?? 0).toLocaleString(undefined, {
-  style: "currency",
-  currency: "USD",
-})}
+                  <p className="text-sm text-zinc-700">
+                    <strong>Client:</strong> {q.client_name ?? "—"}
+                  </p>
 
-
-                    </p>
-
-                    <span className="text-xs px-3 py-1 rounded-full bg-zinc-200">
-                      {quote.status}
-                    </span>
-                  </div>
-
+                  <p className="text-xs text-zinc-500">
+                    {q.created_at ? new Date(q.created_at).toLocaleString() : ""}
+                  </p>
                 </div>
-              </Link>
-            ))}
-          </div>
-        )}
 
-      </div>
+                <div className="text-right">
+                  <p className="text-xs text-zinc-500">Estimated Total</p>
+                  <p className="text-lg font-bold">
+                    {typeof q.estimated_total === "number"
+                      ? q.estimated_total.toLocaleString(undefined, { style: "currency", currency: "USD" })
+                      : typeof q.total === "number"
+                      ? q.total.toLocaleString(undefined, { style: "currency", currency: "USD" })
+                      : "—"}
+                  </p>
+
+                  <Link
+                    href={`/quotes/${q.id}`}
+                    className="inline-block mt-2 px-3 py-2 rounded bg-black text-white text-sm font-semibold"
+                  >
+                    View Quote
+                  </Link>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </main>
   );
 }
