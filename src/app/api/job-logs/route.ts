@@ -16,72 +16,69 @@ function supabaseAdmin() {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
 
-    // These are the fields your frontend should send
     const {
       company_context,
       transcript,
-      priority = "normal",
+      source = "typed", // "typed" | "voice"
+      priority = "Medium",
       important = false,
       client_name = null,
       city = null,
       service_type = null,
       sqft = null,
-      source = "typed",
       meta = null,
+      audio_url = null,
     } = body ?? {};
 
-    // Hard fail if required fields are missing
-    if (!company_context || !transcript) {
-      return NextResponse.json(
-        { error: "company_context and transcript are required" },
-        { status: 400 }
-      );
+    if (!company_context || !String(company_context).trim()) {
+      return NextResponse.json({ error: "company_context is required" }, { status: 400 });
     }
+
+    if (!transcript || !String(transcript).trim()) {
+      return NextResponse.json({ error: "transcript is required" }, { status: 400 });
+    }
+
+    // Normalize sqft safely: "", null, undefined => null; otherwise numeric
+    const sqftNum =
+      sqft === "" || sqft === null || typeof sqft === "undefined"
+        ? null
+        : Number(String(sqft).replace(/[^\d.]/g, ""));
 
     const supabase = supabaseAdmin();
 
-    // Normalize sqft safely (handles "", null, undefined, "1200", 1200)
-const sqftNum =
-  sqft === "" || sqft === null || typeof sqft === "undefined"
-    ? null
-    : Number(String(sqft).replace(/[^\d.]/g, ""));
+    const { data, error } = await supabase
+      .from("job_logs")
+      .insert({
+        company_context,
+        transcript,
+        source,
+        priority,
+        important,
+        client_name,
+        city,
+        service_type,
+        sqft: Number.isFinite(sqftNum as number) ? (sqftNum as number) : null,
+        meta: meta ?? {},
+        audio_url: audio_url ?? null,
+        job_summary: String(transcript).slice(0, 120),
+      })
+      // return enough data for UI + convert-to-quote
+      .select("id, created_at, company_context, source, priority, important, client_name, city, service_type, sqft, transcript")
+      .single();
 
-const { data, error } = await supabase
-  .from("job_logs")
-  .insert({
-    company_context,
-    transcript,
-    source: source ?? "typed",
-    priority: priority ?? null,
-    important: important ?? false,
-    client_name: client_name ?? null,
-    city: city ?? null,
-    service_type: service_type ?? null,
-    sqft: sqft === "" || sqft === undefined ? null : sqft,
-    meta: meta ?? {},
-    job_summary: transcript ? String(transcript).slice(0, 120) : null,
-  })
-  .select("id, created_at")
-  .single();
+    if (error) {
+      console.error("JOB LOG INSERT ERROR:", error);
+      return NextResponse.json(
+        { error: error.message, details: error },
+        { status: 500 }
+      );
+    }
 
-if (error) {
-  console.error("JOB LOG INSERT ERROR:", error);
-  return NextResponse.json({ error: error.message, details: error }, { status: 500 });
-}
-
-return NextResponse.json(
-  { log: { id: data.id, created_at: data.created_at } },
-  { status: 200 }
-);
-
-
-
-
-    // ✅ This is the key: return the inserted row INCLUDING ID
     return NextResponse.json({ log: data }, { status: 200 });
   } catch (e: any) {
+    console.error("JOB LOG POST ERROR:", e);
     return NextResponse.json(
       { error: e?.message ?? "Unknown error" },
       { status: 500 }

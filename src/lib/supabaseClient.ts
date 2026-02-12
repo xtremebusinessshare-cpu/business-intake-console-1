@@ -130,6 +130,7 @@ export async function saveJobLog(payload: {
   company_context: string;
   transcript: string;
   source?: "typed" | "voice";
+  audio_url?: string | null;
 }) {
   const res = await fetch("/api/job-logs", {
     method: "POST",
@@ -138,14 +139,16 @@ export async function saveJobLog(payload: {
       company_context: payload.company_context,
       transcript: payload.transcript,
       source: payload.source ?? "typed",
+      audio_url: payload.audio_url ?? null,
     }),
   });
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || "Failed to save log.");
 
-  return data?.log;
+  return data;
 }
+
 
 export async function fetchJobLogs() {
   const res = await fetch("/api/job-logs", { method: "GET" });
