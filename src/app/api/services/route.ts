@@ -31,20 +31,9 @@ export async function GET(req: Request) {
 
     const supabase = supabaseAdmin();
 
-    /**
-     * IMPORTANT:
-     * This assumes your price book table is named: price_book
-     * and has at least:
-     *  - id
-     *  - company_context (xes/gxs/exquisite_limo)
-     *  - label (what user sees) OR service_name
-     *  - unit
-     *  - default_unit_price
-     *
-     * If your table name is different, change "price_book" below.
-     */
+    // ✅ FIXED TABLE NAME
     const { data, error } = await supabase
-      .from("price_book")
+      .from("services_master")
       .select("id,label,service_name,unit,default_unit_price,category,company_context")
       .eq("company_context", business)
       .order("label", { ascending: true });
