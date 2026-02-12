@@ -14,13 +14,30 @@ function supabaseAdmin() {
   });
 }
 
+function normalizeSource(v: any): "typed" | "voice" {
+  return v === "voice" ? "voice" : "typed";
+}
+
+function normalizePriority(v: any): string {
+  const s = String(v ?? "").trim();
+  return s || "Medium";
+}
+
+function normalizeSqft(v: any): number | null {
+  if (v === "" || v === null || typeof v === "undefined") return null;
+  const n = Number(String(v).replace(/[^\d.]/g, ""));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
 
     const {
       company_context,
-      transcript,
+      transcript = null,
+      audio_url = null,
+
       source = "typed", // "typed" | "voice"
       priority = "Medium",
       important = false,
@@ -29,43 +46,65 @@ export async function POST(req: Request) {
       service_type = null,
       sqft = null,
       meta = null,
-      audio_url = null,
     } = body ?? {};
 
+    // Required: company_context
     if (!company_context || !String(company_context).trim()) {
-      return NextResponse.json({ error: "company_context is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "company_context is required" },
+        { status: 400 }
+      );
     }
 
-    if (!transcript || !String(transcript).trim()) {
-      return NextResponse.json({ error: "transcript is required" }, { status: 400 });
-    }
+    // Required: at least transcript OR audio_url
+    const transcriptText = transcript === null ? "" : String(transcript);
+    const hasTranscript = Boolean(transcriptText.trim());
+    const hasAudioUrl = Boolean(String(audio_url ?? "").trim());
 
-    // Normalize sqft safely: "", null, undefined => null; otherwise numeric
-    const sqftNum =
-      sqft === "" || sqft === null || typeof sqft === "undefined"
-        ? null
-        : Number(String(sqft).replace(/[^\d.]/g, ""));
+    if (!hasTranscript && !hasAudioUrl) {
+      return NextResponse.json(
+        { error: "Provide transcript or audio_url" },
+        { status: 400 }
+      );
+    }
 
     const supabase = supabaseAdmin();
 
+    const sqftNum = normalizeSqft(sqft);
+
+    const insertPayload = {
+      company_context: String(company_context).trim(),
+
+      // Transcript is optional now (audio-only logs allowed)
+      transcript: hasTranscript ? transcriptText : null,
+
+      audio_url: hasAudioUrl ? String(audio_url).trim() : null,
+
+      source: normalizeSource(source),
+      priority: normalizePriority(priority),
+      important: Boolean(important),
+
+      client_name: client_name ? String(client_name).trim() : null,
+      city: city ? String(city).trim() : null,
+      service_type: service_type ? String(service_type).trim() : null,
+      sqft: sqftNum,
+
+      meta: meta ?? {},
+
+      // Give a useful summary even if transcript is empty
+      job_summary: hasTranscript
+        ? transcriptText.slice(0, 120)
+        : hasAudioUrl
+        ? "Audio log saved"
+        : null,
+    };
+
     const { data, error } = await supabase
       .from("job_logs")
-      .insert({
-        company_context,
-        transcript,
-        source,
-        priority,
-        important,
-        client_name,
-        city,
-        service_type,
-        sqft: Number.isFinite(sqftNum as number) ? (sqftNum as number) : null,
-        meta: meta ?? {},
-        audio_url: audio_url ?? null,
-        job_summary: String(transcript).slice(0, 120),
-      })
-      // return enough data for UI + convert-to-quote
-      .select("id, created_at, company_context, source, priority, important, client_name, city, service_type, sqft, transcript")
+      .insert(insertPayload)
+      .select(
+        "id, created_at, company_context, source, priority, important, client_name, city, service_type, sqft, transcript, audio_url"
+      )
       .single();
 
     if (error) {

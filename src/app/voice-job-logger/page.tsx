@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
-import { saveJobLog, supabase } from "@/lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 
 type CompanyContext = "xes" | "gxs" | "exquisite_limo";
 type Priority = "Low" | "Medium" | "High";
@@ -41,17 +41,18 @@ function buildTranscript(input: {
   return lines.join("\n");
 }
 
-function canRecord() {
-  return typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+function safeFilePart(v: string) {
+  return (v || "unknown")
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 40);
 }
 
 export default function VoiceJobLoggerPage() {
   const [companyContext, setCompanyContext] = useState<CompanyContext>("xes");
-
   const [priority, setPriority] = useState<Priority>("Medium");
   const [important, setImportant] = useState(false);
-
-  // User can label the log as typed vs voice (even if pasted transcript)
   const [logType, setLogType] = useState<LogType>("typed");
 
   const [client, setClient] = useState("");
@@ -67,16 +68,14 @@ export default function VoiceJobLoggerPage() {
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Audio (Mode 2)
-  const [recording, setRecording] = useState(false);
+  // --- Audio state ---
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
+  const [audioUploading, setAudioUploading] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [uploadingAudio, setUploadingAudio] = useState(false);
-
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
 
   const transcriptPreview = useMemo(() => {
     return buildTranscript({
@@ -102,126 +101,173 @@ export default function VoiceJobLoggerPage() {
     setError(null);
     setSavedMsg(null);
 
-    // Clear any previous upload proof
-    setAudioUrl(null);
-    if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
-    setAudioPreviewUrl(null);
-    setAudioBlob(null);
-
-    if (!canRecord()) {
-      setError("Recording is not supported in this browser.");
-      return;
-    }
-
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError("Your browser does not support audio recording.");
+        return;
+      }
 
-      const mr = new MediaRecorder(stream);
-      mediaRecorderRef.current = mr;
+      // Reset any previous audio
+      if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
+      setAudioBlob(null);
+      setAudioPreviewUrl(null);
+      setAudioUrl(null);
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Some browsers prefer explicit mimeType; fall back if unsupported
+      const options: MediaRecorderOptions = {};
+      const preferred = "audio/webm;codecs=opus";
+      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported?.(preferred)) {
+        options.mimeType = preferred;
+      }
+
+      const recorder = new MediaRecorder(stream, options);
       chunksRef.current = [];
 
-      mr.ondataavailable = (e) => {
+      recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      mr.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+      recorder.onstop = () => {
+        // stop tracks so mic turns off
+        stream.getTracks().forEach((t) => t.stop());
+
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         setAudioBlob(blob);
+
         const url = URL.createObjectURL(blob);
         setAudioPreviewUrl(url);
 
-        // Stop mic tracks
-        stream.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
+        // If you recorded, it’s a voice log
+        setLogType("voice");
       };
 
-      mr.start();
-      setRecording(true);
-
-      // If they’re recording audio, this is a “voice” log
-      setLogType("voice");
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
     } catch (e: any) {
-      setError(e?.message || "Could not access microphone.");
+      setError(e?.message || "Could not start recording (mic permissions?).");
     }
   }
 
   function stopRecording() {
-    const mr = mediaRecorderRef.current;
-    if (!mr) return;
     try {
-      mr.stop();
+      const r = mediaRecorderRef.current;
+      if (!r) return;
+
+      if (r.state !== "inactive") r.stop();
+      setIsRecording(false);
+      mediaRecorderRef.current = null;
     } catch {
-      // ignore
+      setIsRecording(false);
     }
-    setRecording(false);
+  }
+
+  async function uploadAudio() {
+    setError(null);
+    setSavedMsg(null);
+
+    if (!audioBlob) {
+      setError("No audio to upload yet. Record first.");
+      return;
+    }
+
+    setAudioUploading(true);
+    try {
+      const ext = (audioBlob.type || "").includes("webm") ? "webm" : "wav";
+      const filename = `${new Date().toISOString()}_${safeFilePart(companyContext)}_${safeFilePart(
+        client || "no-client"
+      )}.${ext}`;
+
+      const path = `${companyContext}/${filename}`;
+
+      const { error: upErr } = await supabase.storage
+        .from("job-audio")
+        .upload(path, audioBlob, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: audioBlob.type || "audio/webm",
+        });
+
+      if (upErr) throw upErr;
+
+      // Public bucket -> public URL
+      const pub = supabase.storage.from("job-audio").getPublicUrl(path);
+      const publicUrl = pub?.data?.publicUrl;
+
+      if (!publicUrl) throw new Error("Upload succeeded but could not generate public URL.");
+
+      setAudioUrl(publicUrl);
+      setSavedMsg("Audio uploaded and attached to this log.");
+    } catch (e: any) {
+      setError(e?.message || "Audio upload failed.");
+    } finally {
+      setAudioUploading(false);
+    }
   }
 
   function clearAudio() {
-    setAudioUrl(null);
-    setAudioBlob(null);
     if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
+    setAudioBlob(null);
     setAudioPreviewUrl(null);
-  }
-
-  async function uploadAudio(blob: Blob) {
-    // Bucket must exist in Supabase Storage: job-audio
-    // Recommended: public bucket ON (simplest)
-    const key = `job-audio/${companyContext}/${Date.now()}.webm`;
-
-    const { data, error } = await supabase.storage
-      .from("job-audio")
-      .upload(key, blob, { contentType: "audio/webm", upsert: false });
-
-    if (error) throw error;
-
-    const { data: pub } = supabase.storage.from("job-audio").getPublicUrl(data.path);
-    return pub.publicUrl;
+    setAudioUrl(null);
   }
 
   async function onSave() {
     setError(null);
     setSavedMsg(null);
 
-    const hasAnyContent =
-      !!notes.trim() ||
-      actions.length > 0 ||
-      !!client.trim() ||
-      !!service.trim() ||
-      !!city.trim() ||
-      !!sqft.trim() ||
-      !!audioBlob;
+    // Allow saving notes-only, or actions-only, or client/service-only
+    const hasTypedInfo =
+  notes.trim() ||
+  actions.length > 0 ||
+  client.trim() ||
+  service.trim() ||
+  city.trim() ||
+  sqft.trim();
 
-    if (!hasAnyContent) {
-      setError("Add at least a note, an action, basic info, or record audio.");
-      return;
-    }
+const hasAudio = Boolean(audioBlob) || Boolean(audioUrl);
+
+if (!hasTypedInfo && !hasAudio) {
+  setError("Add at least a note/action OR record audio.");
+  return;
+}
+
 
     setSaving(true);
-
     try {
-      let finalAudioUrl: string | null = audioUrl;
+      // Send structured columns + transcript + audio_url
+      const res = await fetch("/api/job-logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company_context: companyContext,
+          transcript: transcriptPreview,
+          source: logType, // "typed" | "voice"
 
-      // Upload audio (only if we have a blob and not already uploaded)
-      if (audioBlob && !finalAudioUrl) {
-        setUploadingAudio(true);
-        finalAudioUrl = await uploadAudio(audioBlob);
-        setAudioUrl(finalAudioUrl);
-      }
+          priority,
+          important,
 
-      // If audio exists, this should be saved as voice even if the user forgot
-      const finalSource: LogType = finalAudioUrl ? "voice" : logType;
+          client_name: client.trim() || null,
+          city: city.trim() || null,
+          service_type: service.trim() || null,
+          sqft: sqft.trim() || null,
 
-      await saveJobLog({
-        company_context: companyContext,
-        transcript: transcriptPreview,
-        source: finalSource,
-        audio_url: finalAudioUrl,
+          // store actions in meta too (optional, but helpful later)
+          meta: { actions },
+
+          audio_url: audioUrl ?? null,
+        }),
       });
 
-      setSavedMsg("Saved. You can view it in Logs.");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Failed to save log.");
 
-      // Reset (keep business + priority)
+      // If API returns id, great (you already confirmed it does)
+      setSavedMsg(`Saved. Log ID: ${data?.log?.id || "ok"} (View in Logs)`);
+
+      // Reset (keep business, priority, logType)
       setImportant(false);
       setClient("");
       setCity("");
@@ -231,12 +277,12 @@ export default function VoiceJobLoggerPage() {
       setActionInput("");
       setNotes("");
 
-      // Reset audio proof (keep logType as-is)
+      // keep audio? usually reset after save
       clearAudio();
+      setLogType("typed");
     } catch (e: any) {
       setError(e?.message || "Failed to save log.");
     } finally {
-      setUploadingAudio(false);
       setSaving(false);
     }
   }
@@ -247,8 +293,7 @@ export default function VoiceJobLoggerPage() {
         <div>
           <h1 className="text-2xl font-bold">Job Logger</h1>
           <p className="text-zinc-600">
-            Capture notes + action items and optionally enter quote-ready details (client, service, sqft).
-            You can also record audio proof (no OpenAI needed).
+            Capture notes + action items. Optional: record/upload audio proof and convert to quotes later.
           </p>
         </div>
 
@@ -270,72 +315,75 @@ export default function VoiceJobLoggerPage() {
           <li>Enter client/service/sqft when you want to convert into a quote later.</li>
           <li>Use Actions for reminders: “find invoice”, “adjust water meter”, “check shelves”.</li>
           <li>Mark Important + set Priority so you can sort and focus fast in Logs.</li>
-          <li>
-            If you record audio, the log will automatically be saved as <strong>voice</strong> and store an audio link.
-          </li>
+          <li>Record audio if you want “proof / reference”. Upload attaches a link to the log.</li>
         </ul>
         <p className="text-xs text-zinc-500">
-          Tip: Everything is stored as one transcript so it stays flexible now and can become “smart” later.
+          Tip: Everything is saved as transcript + structured fields so quotes can prefill later.
         </p>
       </div>
 
-      {/* Audio Proof (Mode 2) */}
+      {/* Audio Proof */}
       <div className="rounded-xl border bg-white p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <p className="font-semibold">Audio proof (optional)</p>
+            <p className="font-semibold">Audio Proof (optional)</p>
             <p className="text-xs text-zinc-500">
-              Records in your browser and uploads to Supabase Storage bucket <code>job-audio</code>.
+              Record → (optional) Upload → Save Log. Upload creates an audio_url stored in job_logs.
             </p>
           </div>
 
           <div className="flex gap-2">
-            {!recording ? (
+            {!isRecording ? (
               <button
                 type="button"
-                className="px-4 py-2 rounded bg-zinc-100 font-semibold"
+                className="rounded-lg bg-black text-white px-4 py-2 font-semibold"
                 onClick={startRecording}
               >
-                Start recording
+                Start Recording
               </button>
             ) : (
               <button
                 type="button"
-                className="px-4 py-2 rounded bg-black text-white font-semibold"
+                className="rounded-lg bg-red-600 text-white px-4 py-2 font-semibold"
                 onClick={stopRecording}
               >
-                Stop recording
+                Stop
               </button>
             )}
 
-            {(audioBlob || audioUrl) && (
-              <button
-                type="button"
-                className="px-4 py-2 rounded bg-zinc-100 font-semibold"
-                onClick={clearAudio}
-              >
-                Clear audio
-              </button>
-            )}
+            <button
+              type="button"
+              className="rounded-lg bg-zinc-100 px-4 py-2 font-semibold disabled:opacity-60"
+              onClick={uploadAudio}
+              disabled={audioUploading || !audioBlob}
+            >
+              {audioUploading ? "Uploading…" : "Upload Audio"}
+            </button>
+
+            <button
+              type="button"
+              className="rounded-lg bg-zinc-100 px-4 py-2 font-semibold disabled:opacity-60"
+              onClick={clearAudio}
+              disabled={!audioBlob && !audioUrl}
+            >
+              Clear
+            </button>
           </div>
         </div>
 
-        {!canRecord() ? (
-          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-            Your browser does not support microphone recording on this page.
-          </p>
-        ) : null}
-
         {audioPreviewUrl && (
           <div className="space-y-2">
+            <p className="text-sm font-medium">Preview</p>
             <audio controls src={audioPreviewUrl} className="w-full" />
-            {audioUrl ? (
-              <p className="text-xs text-zinc-600 break-all">Uploaded URL: {audioUrl}</p>
-            ) : (
-              <p className="text-xs text-zinc-500">
-                Audio will upload when you click <strong>Save Log</strong>.
-              </p>
-            )}
+          </div>
+        )}
+
+        {audioUrl && (
+          <div className="text-sm">
+            <p className="font-medium">Attached audio link</p>
+            <a className="text-blue-600 underline break-all" href={audioUrl} target="_blank" rel="noreferrer">
+              {audioUrl}
+            </a>
           </div>
         )}
       </div>
@@ -362,15 +410,10 @@ export default function VoiceJobLoggerPage() {
               className="mt-1 w-full rounded-lg border p-2"
               value={logType}
               onChange={(e) => setLogType(e.target.value as LogType)}
-              disabled={!!audioBlob || !!audioUrl || recording} // audio implies voice
-              title={audioBlob || audioUrl ? "Recording audio forces voice type." : undefined}
             >
               <option value="typed">Typed</option>
               <option value="voice">Voice</option>
             </select>
-            {(audioBlob || audioUrl || recording) && (
-              <p className="text-xs text-zinc-500 mt-1">Audio recorded → saved as voice.</p>
-            )}
           </div>
 
           <div>
@@ -388,7 +431,11 @@ export default function VoiceJobLoggerPage() {
 
           <div className="flex items-end">
             <label className="inline-flex items-center gap-2 text-sm font-medium">
-              <input type="checkbox" checked={important} onChange={(e) => setImportant(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={important}
+                onChange={(e) => setImportant(e.target.checked)}
+              />
               Mark as Important
             </label>
           </div>
@@ -430,7 +477,11 @@ export default function VoiceJobLoggerPage() {
             />
           </div>
           <div className="md:col-span-2 flex items-end">
-            <button type="button" className="w-full rounded-lg bg-zinc-100 px-3 py-2 font-semibold" onClick={addAction}>
+            <button
+              type="button"
+              className="w-full rounded-lg bg-zinc-100 px-3 py-2 font-semibold"
+              onClick={addAction}
+            >
               + Add
             </button>
           </div>
@@ -443,7 +494,11 @@ export default function VoiceJobLoggerPage() {
               {actions.map((a, idx) => (
                 <li key={idx} className="flex items-center justify-between gap-3">
                   <span>{a}</span>
-                  <button type="button" className="text-xs text-red-600" onClick={() => setActions((p) => p.filter((_, i) => i !== idx))}>
+                  <button
+                    type="button"
+                    className="text-xs text-red-600"
+                    onClick={() => setActions((p) => p.filter((_, i) => i !== idx))}
+                  >
                     remove
                   </button>
                 </li>
@@ -469,14 +524,14 @@ export default function VoiceJobLoggerPage() {
           <pre className="whitespace-pre-wrap text-xs text-zinc-700">{transcriptPreview}</pre>
         </div>
 
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <button
             type="button"
             className="rounded-lg bg-black text-white px-5 py-3 font-semibold disabled:opacity-60"
-            disabled={saving || uploadingAudio}
+            disabled={saving}
             onClick={onSave}
           >
-            {uploadingAudio ? "Uploading audio…" : saving ? "Saving…" : "Save Log"}
+            {saving ? "Saving…" : "Save Log"}
           </button>
 
           {savedMsg && <span className="text-sm text-green-700">{savedMsg}</span>}
