@@ -24,7 +24,7 @@ export default async function AdminVoicePage() {
     <main className="max-w-5xl mx-auto p-6 space-y-6">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Admin — All Logs</h1>
+          <h1 className="text-2xl font-bold">Admin — Job & Note Logs</h1>
           <p className="text-sm text-zinc-600">
             All logs (typed + voice + audio). Archive or delete as needed.
           </p>

@@ -25,7 +25,7 @@ export default function AdminDashboard() {
           />
 
           <AdminCard
-            title="Voice Logs"
+            title="Job & Note Logs"
             description="Access recorded job intakes"
             href="/admin/voice"
           />
