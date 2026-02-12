@@ -30,21 +30,45 @@ export default async function AdminReceiptsPage() {
   return (
     <main className="min-h-screen bg-zinc-50 p-8">
       <div className="max-w-5xl mx-auto space-y-6">
-        <header className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold">Admin — Receipts & Images</h1>
-            <p className="text-zinc-600 mt-2">Review uploaded receipts, photos, and documents.</p>
-          </div>
+       <header className="flex items-start justify-between gap-4">
+  <div>
+    <h1 className="text-2xl font-bold">Admin — Receipts & Images</h1>
+    <p className="text-sm text-zinc-600">
+      Review uploaded receipts and documentation.
+    </p>
+  </div>
 
-          <div className="flex gap-2">
-            <Link href="/" className="px-4 py-2 rounded bg-zinc-100 font-semibold">
-              Home
-            </Link>
-            <Link href="/admin" className="px-4 py-2 rounded bg-black text-white font-semibold">
-              Admin Console
-            </Link>
-          </div>
-        </header>
+  <div className="flex gap-2 flex-wrap">
+    <Link
+      href="/admin"
+      className="px-4 py-2 rounded bg-zinc-100 font-semibold"
+    >
+      Admin Home
+    </Link>
+
+    <Link
+      href="/admin/quotes"
+      className="px-4 py-2 rounded bg-zinc-100 font-semibold"
+    >
+      Quotes
+    </Link>
+
+    <Link
+      href="/admin/voice"
+      className="px-4 py-2 rounded bg-zinc-100 font-semibold"
+    >
+      Job & Note Logs
+    </Link>
+
+    <Link
+      href="/"
+      className="px-4 py-2 rounded bg-black text-white font-semibold"
+    >
+      Home
+    </Link>
+  </div>
+</header>
+
 
         {error ? (
           <p className="text-red-600">Failed to load receipts: {error.message}</p>
